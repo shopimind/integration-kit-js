@@ -54,9 +54,11 @@ export interface NewCustomDataDefinition {
   /**
    * Schema-level relationships to other definitions (forwarded as-is to the API).
    * `sourceField` is a field of THIS definition; it links to `targetSchema` — a
-   * `'system'` schema (e.g. `contacts`, `products`) or another `'custom'` definition
-   * (by its numeric id) — optionally matched on `targetField` (defaults to the
-   * target's id). Mirrors the API's relationship DTO; `custom`→`custom` is supported.
+   * `'system'` schema (e.g. `contacts`, `products`) or another `'custom'` definition.
+   * For a custom target, `targetSchema` is the target's numeric id — OR, inside a
+   * `provisioning.customData` plan, the NAME of a sibling definition (declared before
+   * this one), which the kit resolves to its id at creation. Optionally matched on
+   * `targetField` (defaults to the target's id). `custom`→`custom` is supported.
    */
   relationships?: Array<{
     sourceField: string;

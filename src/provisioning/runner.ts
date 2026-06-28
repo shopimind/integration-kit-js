@@ -1,5 +1,6 @@
 import { SpmOrdersStatuses, SpmHelpers, type SpmHttpClient } from '@shopimind/sdk-js';
 import type { ProvisioningPlan } from '../integration/types.js';
+import type { NewCustomDataDefinition } from '../contracts/index.js';
 import { validateProvisioningEvents } from '../integration/define-integration.js';
 import { ensureDataSource, ensureCustomDataDefinition, ensureEvent } from './ensure.js';
 
@@ -32,7 +33,7 @@ export async function runProvisioning(client: SpmHttpClient, plan: ProvisioningP
 
   for (const def of plan.customData ?? []) {
     try {
-      result.defIds[def.name] = await ensureCustomDataDefinition(client, def);
+      result.defIds[def.name] = await ensureCustomDataDefinition(client, resolveCustomRelationTargets(def, result.defIds));
     } catch (e) {
       result.errors.push(`def ${def.name}: ${errMsg(e)}`);
     }
@@ -60,6 +61,29 @@ export async function runProvisioning(client: SpmHttpClient, plan: ProvisioningP
   }
 
   return result;
+}
+
+/**
+ * Resolves a custom relationship's `targetSchema` declared by NAME (a sibling
+ * definition in the same plan) to the sibling's numeric id — mirroring how
+ * dataSources resolve `parentKey` -> `parent_id`. The target must have been created
+ * earlier in the run (declare it BEFORE the definition that references it); a
+ * `targetSchema` that is already an id, or that names an out-of-plan definition, is
+ * left untouched.
+ */
+function resolveCustomRelationTargets(
+  def: NewCustomDataDefinition,
+  defIds: Record<string, number>,
+): NewCustomDataDefinition {
+  if (!def.relationships?.length) return def;
+  return {
+    ...def,
+    relationships: def.relationships.map((r) =>
+      r.targetSchemaType === 'custom' && defIds[r.targetSchema] != null
+        ? { ...r, targetSchema: String(defIds[r.targetSchema]) }
+        : r,
+    ),
+  };
 }
 
 function errMsg(e: unknown): string {

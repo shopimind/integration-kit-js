@@ -104,13 +104,22 @@ export async function ensureCustomDataDefinition(
       await SpmCustomDataDefinitions.get(client, id),
       'getCustomDataDefinition',
     );
+    // Convergent extend: send only what the existing definition LACKS — new fields
+    // (by `name`) AND new relationships (by `sourceField`). The API appends, so
+    // existing fields/relationships are preserved.
     const fields = Array.isArray(full.fields) ? (full.fields as Array<{ name?: string }>) : [];
-    const have = new Set(fields.map((f) => f.name).filter((n): n is string => !!n));
-    const missing = def.fields.filter((f) => !have.has(f.name));
-    if (missing.length > 0) {
+    const haveFields = new Set(fields.map((f) => f.name).filter((n): n is string => !!n));
+    const missingFields = def.fields.filter((f) => !haveFields.has(f.name));
+
+    const rels = Array.isArray(full.relationships) ? (full.relationships as Array<{ sourceField?: string }>) : [];
+    const haveRels = new Set(rels.map((r) => r.sourceField).filter((s): s is string => !!s));
+    const missingRels = (def.relationships ?? []).filter((r) => !haveRels.has(r.sourceField));
+
+    if (missingFields.length > 0 || missingRels.length > 0) {
       SpmHelpers.unwrapOrThrow(
         await SpmCustomDataDefinitions.extend(client, id, {
-          fields: missing.map(toSdkField),
+          ...(missingFields.length > 0 ? { fields: missingFields.map(toSdkField) } : {}),
+          ...(missingRels.length > 0 ? { relationships: missingRels } : {}),
         } as unknown as Parameters<typeof SpmCustomDataDefinitions.extend>[2]),
         'extendCustomDataDefinition',
       );

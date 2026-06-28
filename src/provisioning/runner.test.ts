@@ -62,4 +62,33 @@ describe('runProvisioning', () => {
     expect(r.events).toBe(1);
     expect(r.errors).toEqual([]);
   });
+
+  it('resolves a custom->custom relationship target declared by sibling name', async () => {
+    const createBodies: Array<Record<string, unknown>> = [];
+    const client = mockClient(({ method, url, body }) => {
+      if (method === 'get' && url === 'custom-data-definitions') return read([]);
+      if (method === 'post' && url === 'custom-data-definitions') {
+        createBodies.push(body);
+        return read({ id_definition: createBodies.length === 1 ? 30 : 31 });
+      }
+      if (method === 'patch' && /custom-data-definitions\/\d+\/activate$/.test(url)) return read({});
+      return read({});
+    });
+    const r = await runProvisioning(client, {
+      customData: [
+        { name: 'stores', fields: [{ name: 'store_ref', type: 'text' }] },
+        {
+          name: 'contact_store',
+          fields: [{ name: 'store', type: 'number' }],
+          relationships: [
+            { sourceField: 'store', targetSchemaType: 'custom', targetSchema: 'stores', targetField: 'store_ref' },
+          ],
+        },
+      ],
+    });
+    expect(r.defIds).toEqual({ stores: 30, contact_store: 31 });
+    // the 2nd create payload references the RESOLVED id '30', not the name 'stores'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((createBodies[1] as any).relationships[0].targetSchema).toBe('30');
+  });
 });

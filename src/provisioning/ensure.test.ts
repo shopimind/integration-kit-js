@@ -42,6 +42,29 @@ describe('ensureCustomDataDefinition', () => {
     expect(extended?.map((f) => f.name)).toEqual(['points']); // only the missing field
   });
 
+  it('extends the existing def with a missing relationship (convergent)', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let extendBody: any = null;
+    const client = mockClient(({ method, url, body }) => {
+      if (method === 'get' && url === 'custom-data-definitions') return read([{ id_definition: 7, name: 'pos_profile' }]);
+      if (method === 'get' && url === 'custom-data-definitions/7')
+        return read({ id_definition: 7, name: 'pos_profile', fields: [{ name: 'id_customer' }], relationships: [] });
+      if (method === 'patch' && url === 'custom-data-definitions/7/extend') { extendBody = body; return read({}); }
+      return read({});
+    });
+    const def = {
+      name: 'pos_profile',
+      fields: [{ name: 'id_customer', type: 'text' as const }],
+      relationships: [
+        { sourceField: 'id_customer', targetSchemaType: 'system' as const, targetSchema: 'contacts', targetField: 'id_contact' },
+      ],
+    };
+    const id = await ensureCustomDataDefinition(client, def);
+    expect(id).toBe(7);
+    expect(extendBody.relationships?.[0]?.sourceField).toBe('id_customer');
+    expect(extendBody.fields).toBeUndefined(); // no missing field -> relationships only
+  });
+
   it('creates then activates when the def is absent', async () => {
     let activated = 0;
     const client = mockClient(({ method, url }) => {
