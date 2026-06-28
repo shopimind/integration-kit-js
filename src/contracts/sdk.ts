@@ -51,7 +51,19 @@ export interface NewCustomDataDefinition {
   description?: string;
   unique_keys?: string[];
   fields: NewCustomDataField[];
-  relationships?: Array<{ target: string; by: string }>;
+  /**
+   * Schema-level relationships to other definitions (forwarded as-is to the API).
+   * `sourceField` is a field of THIS definition; it links to `targetSchema` — a
+   * `'system'` schema (e.g. `contacts`, `products`) or another `'custom'` definition
+   * (by its numeric id) — optionally matched on `targetField` (defaults to the
+   * target's id). Mirrors the API's relationship DTO; `custom`→`custom` is supported.
+   */
+  relationships?: Array<{
+    sourceField: string;
+    targetSchemaType: 'system' | 'custom';
+    targetSchema: string;
+    targetField?: string;
+  }>;
 }
 
 /** Order status to provision (declaration). */

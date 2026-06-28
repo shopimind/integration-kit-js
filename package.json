@@ -1,6 +1,6 @@
 {
   "name": "@shopimind/integration-kit-js",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Foundation for building ShopiMind integrations: a runtime plus typed, once-tested primitives (HMAC webhook signatures, encryption, log redaction, a safe cursor-based sync engine, pagination/concurrency, persistence, ShopiMind SDK re-export, idempotent provisioning, secured inbound middleware, HTTP server). An integration only writes pure functions and declarations passed to defineIntegration.",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
