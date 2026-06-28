@@ -62,7 +62,7 @@ export const integration = defineIntegration({
       cursorScope: 'global',
       enabled: (s) => s.syncCustomers,
       run: async (ctx) => {
-        // ctx.spm.* (ShopiMind API), ctx.paginate(...), ctx.state, ctx.logger...
+        // ctx.sendBulk(fn, items) — safe push · ctx.spm + SDK statics · ctx.paginate(...) · ctx.state · ctx.logger
         return { items: 0, errors: [] };
       },
     },

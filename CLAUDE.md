@@ -55,10 +55,12 @@ déclarations — elle ne réimplémente jamais l'infra.
 - `security/` — signature HMAC (corps brut, timing-safe, anti-rejeu), crypto AES-256-GCM, redaction.
 - `store/` — SQLite + migrations versionnées (append-only) + repositories typés. **Seuls les secrets sont
   chiffrés** au repos (`setSecret`) ; les PII et l'état non-secret sont en clair, le fichier SQLite n'est pas chiffré.
-- `sdk/` — helper `withSource` (→ `SourceHandle`) ; le client SDK provient de `@shopimind/sdk-js`,
-  dépendance directe **ré-exportée** par le kit (`export * from '@shopimind/sdk-js'`). Plus de gateway/adaptateur :
-  l'intégration tape le SDK directement via `ctx.spm` (un `SpmHttpClient`).
-- `provisioning/` — find-or-create idempotent (sources de données, custom data, events).
+- `sdk/` — helpers `withSource` (→ `SourceHandle`), `customData` (→ `CustomDataHandle`) et
+  `sendBulk` (push sûr : chunké, throw sur transport, remonte les rejets) ; le client SDK provient
+  de `@shopimind/sdk-js`, dépendance directe **ré-exportée** par le kit (`export * from '@shopimind/sdk-js'`).
+  Plus de gateway/adaptateur : l'intégration tape le SDK directement via `ctx.spm` (un `SpmHttpClient`).
+- `provisioning/` — find-or-create idempotent (sources de données, custom data + relations, events).
+  Relations custom→custom : la cible peut être désignée par NOM (déf sœur), résolue en id à la création.
 - `lifecycle/`, `http/`, `runtime/` — dispatcher de cycle de vie, serveur Hapi, assemblage (`createIntegrationApp`).
 
 ## Identité git
