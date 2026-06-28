@@ -10,6 +10,7 @@ import { runProvisioning } from '../provisioning/runner.js';
 import { ensureInboundSecret } from './inbound.js';
 import { makeWithSource } from '../sdk/source-scope.js';
 import { makeSendBulk } from '../sdk/send-bulk.js';
+import { makeCustomData } from '../sdk/custom-data-scope.js';
 
 export const ACCESS_TOKEN_KEY = '__access_token';
 /** State key where the provisioning result (sourceIds/defIds) is stored. */
@@ -296,6 +297,7 @@ function buildContext<S>(id: string, deps: DispatcherDeps<S>): IntegrationContex
     setExternalAccount: (acc) => deps.repos.installs.setExternalAccount(id, acc.id, acc.name ?? null),
     inboundSecret: ensureInboundSecret(deps.repos.state, id),
     withSource: makeWithSource(deps.repos.state, id, PROVISIONING_KEY, sendBulk),
+    customData: makeCustomData(deps.repos.state, id, PROVISIONING_KEY, sendBulk, spm),
   };
 }
 
@@ -313,6 +315,9 @@ function ephemeralContext<S>(configs: RawConfigs, deps: DispatcherDeps<S>): Inte
     inboundSecret: '',
     withSource: () => {
       throw new Error('withSource is unavailable during the configuration wizard (no installation)');
+    },
+    customData: () => {
+      throw new Error('customData is unavailable during the configuration wizard (no installation)');
     },
   };
 }

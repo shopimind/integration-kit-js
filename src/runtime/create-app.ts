@@ -10,6 +10,7 @@ import { runIntegrationSync, type SyncSummary } from '../sync/engine.js';
 import { ACCESS_TOKEN_KEY, PROVISIONING_KEY, type DispatcherDeps } from '../lifecycle/dispatcher.js';
 import { ensureInboundSecret } from '../lifecycle/inbound.js';
 import { makeWithSource } from '../sdk/source-scope.js';
+import { makeCustomData } from '../sdk/custom-data-scope.js';
 import { makeSendBulk } from '../sdk/send-bulk.js';
 import { createRateLimiter } from './rate-limiter.js';
 import { createServer } from '../http/server.js';
@@ -113,6 +114,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
       setExternalAccount: (acc) => repos.installs.setExternalAccount(id, acc.id, acc.name ?? null),
       inboundSecret: ensureInboundSecret(repos.state, id),
       withSource: makeWithSource(repos.state, id, PROVISIONING_KEY, sendBulk),
+      customData: makeCustomData(repos.state, id, PROVISIONING_KEY, sendBulk, spm),
     };
   };
 
@@ -139,6 +141,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
           cursors: repos.cursors,
           runs: repos.runs,
           makeSource: (sb) => makeWithSource(repos.state, id, PROVISIONING_KEY, sb),
+          makeCustomData: (sb) => makeCustomData(repos.state, id, PROVISIONING_KEY, sb, base.spm),
         },
         { fullBackfill: o?.full ?? false, backfillDays },
       );

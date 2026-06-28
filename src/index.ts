@@ -21,6 +21,8 @@ export * from './sync/engine.js';
 export * from '@shopimind/sdk-js';
 // Provisioned source helper (`ctx.withSource` -> SourceHandle).
 export * from './sdk/source-scope.js';
+// Provisioned custom data helper (`ctx.customData` -> CustomDataHandle).
+export * from './sdk/custom-data-scope.js';
 // Safe bulk push types (`ctx.sendBulk` / `withSource(k).send` return a BulkResult).
 export type { BulkResult, SendBulk, SendBulkOptions } from './sdk/send-bulk.js';
 

@@ -5,6 +5,7 @@ import { SecretCipher } from '../security/crypto.js';
 import { createLogger } from '../logging/logger.js';
 import { runIntegrationSync, computeWindow } from './engine.js';
 import { makeWithSource } from '../sdk/source-scope.js';
+import { makeCustomData } from '../sdk/custom-data-scope.js';
 import { makeSendBulk, type SendBulk } from '../sdk/send-bulk.js';
 import { PROVISIONING_KEY } from '../lifecycle/dispatcher.js';
 import type { IntegrationContext, SyncStep } from '../integration/types.js';
@@ -29,11 +30,15 @@ function setup() {
     withSource: () => {
       throw new Error('n/a');
     },
+    customData: () => {
+      throw new Error('n/a');
+    },
   };
   const deps = {
     cursors: repos.cursors,
     runs: repos.runs,
     makeSource: (sb: SendBulk) => makeWithSource(repos.state, 'inst', PROVISIONING_KEY, sb),
+    makeCustomData: (sb: SendBulk) => makeCustomData(repos.state, 'inst', PROVISIONING_KEY, sb, spm),
   };
   return { repos, base, deps };
 }

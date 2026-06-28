@@ -8,6 +8,7 @@ import type {
   SyncWindow,
 } from '../integration/types.js';
 import type { SourceHandle } from '../sdk/source-scope.js';
+import type { CustomDataHandle } from '../sdk/custom-data-scope.js';
 import { makeSendBulk, type SendBulk } from '../sdk/send-bulk.js';
 import { paginate } from './paginate.js';
 import { mapWithConcurrency } from './concurrency.js';
@@ -46,6 +47,11 @@ export interface SyncDeps {
    * runtime, which knows the installation + provisioning state.
    */
   makeSource: (sendBulk: SendBulk) => (sourceKey: string) => SourceHandle;
+  /**
+   * Builds `customData` bound to a given `sendBulk`, so `customData(name).save(...)`
+   * inside a step feeds the step's reject accumulator.
+   */
+  makeCustomData: (sendBulk: SendBulk) => (name: string) => CustomDataHandle;
 }
 
 /**
@@ -135,6 +141,7 @@ async function runOneSource<S>(
     mapConcurrent: mapWithConcurrency,
     sendBulk: stepSendBulk,
     withSource: deps.makeSource(stepSendBulk),
+    customData: deps.makeCustomData(stepSendBulk),
   };
 
   let result: SyncStepResult;

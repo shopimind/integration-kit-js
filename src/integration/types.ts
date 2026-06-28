@@ -10,6 +10,7 @@ import type {
 import type { SpmHttpClient } from '@shopimind/sdk-js';
 import type { SourceHandle } from '../sdk/source-scope.js';
 import type { SendBulk } from '../sdk/send-bulk.js';
+import type { CustomDataHandle } from '../sdk/custom-data-scope.js';
 import type { IntegrationStateRepo } from '../store/repositories.js';
 import type { CursorRow } from '../store/types.js';
 import type { Logger } from '../logging/logger.js';
@@ -66,6 +67,13 @@ export interface IntegrationContext<S> {
    * (Also namespace your identifiers: the source alone does not isolate them.)
    */
   withSource(sourceKey: string): SourceHandle;
+  /**
+   * Handle for a PROVISIONED custom data definition (declared in
+   * `provisioning.customData`): its numeric `id` plus a safe `save(records)`.
+   * `name` must match a definition declared in `provisioning.customData`.
+   * The custom-data counterpart of {@link IntegrationContext.withSource}.
+   */
+  customData(name: string): CustomDataHandle;
 }
 
 export interface SyncWindow {
