@@ -25,6 +25,7 @@ jobs:
       - run: npm install -g npm@latest         # OIDC-capable npm
       - run: yarn install --frozen-lockfile
       - run: yarn build
+      - run: yarn typecheck
       - run: yarn test
       - name: Publish (skip if this version is already on npm)
         run: |
