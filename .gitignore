@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.tsbuildinfo
+.turbo/
+coverage/
+
+# Local SQLite stores
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log

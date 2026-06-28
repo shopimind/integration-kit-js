@@ -1,0 +1,37 @@
+name: Publish (npm)
+
+# Publishes @shopimind/integration-kit-js to npm on every published GitHub Release.
+# Tokenless auth via OIDC "Trusted Publishing" (configure on npmjs.com:
+#   package > Settings > Trusted Publisher = shopimind/integration-kit-js, publish.yml).
+# Bump "version" in package.json BEFORE creating the release/tag.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write          # required for OIDC Trusted Publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'                  # OIDC needs npm >= 11.5.1 (Node 20+)
+          registry-url: 'https://registry.npmjs.org'
+          cache: yarn
+      - run: npm install -g npm@latest         # OIDC-capable npm
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+      - run: yarn test
+      - name: Publish (skip if this version is already on npm)
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          V=$(node -p "require('./package.json').version")
+          if npm view "$PKG@$V" version >/dev/null 2>&1; then
+            echo "::warning::$PKG@$V already published — skipping (bump the version)."
+          else
+            npm publish --access public
+          fi
