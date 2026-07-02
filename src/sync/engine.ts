@@ -59,6 +59,28 @@ export function backoffWindowMs(consecutiveFailures: number): number {
   return Math.min(ms, MAX_BACKOFF_MS);
 }
 
+/**
+ * Decides whether per-item rejections should be TOLERATED (cursor may advance),
+ * per the step's `tolerateRejects` policy (E8):
+ *   - `undefined`/`false` -> never tolerate (strict hold);
+ *   - `true`              -> always tolerate (poison-pill escape hatch);
+ *   - `{ maxRatio }`      -> tolerate only while rejected/attempted <= maxRatio.
+ * `attempted` = accepted `items` + `rejected` (the reject sink is not counted in
+ * `items`, so we add it back to size the denominator).
+ */
+export function rejectsTolerated(
+  policy: boolean | { maxRatio: number } | undefined,
+  rejected: number,
+  items: number,
+): boolean {
+  if (!policy) return false;
+  if (policy === true) return true;
+  const attempted = items + rejected;
+  if (attempted <= 0) return true; // nothing attempted -> nothing to hold on
+  const ratio = rejected / attempted;
+  return ratio <= policy.maxRatio;
+}
+
 export interface SyncSummary {
   runId: number;
   status: 'ok' | 'partial';
@@ -241,8 +263,10 @@ async function runOneSource<S>(
   // rejections (data the API did NOT persist). `tolerateRejects` only lifts (b) — for
   // a windowed stream a PERMANENT rejection ("poison pill") would otherwise freeze the
   // window forever — but rejections stay visible (the warn log + the summary count).
+  // E8: `{ maxRatio }` tolerates only while the reject ratio stays within budget.
   const cleanRun = shouldAdvanceCursor(result);
-  const blockedByRejects = rejects.count > 0 && !step.tolerateRejects;
+  const tolerated = rejectsTolerated(step.tolerateRejects, rejects.count, result.items);
+  const blockedByRejects = rejects.count > 0 && !tolerated;
   const advanced = cleanRun && !blockedByRejects;
 
   const errors = [...result.errors];

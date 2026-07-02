@@ -115,8 +115,14 @@ export interface SyncStep<S> {
    * stream where a PERMANENT rejection (a malformed item the API always rejects)
    * would otherwise freeze the window forever ("poison pill"). Even when `true`,
    * rejections are still surfaced (logged + counted); only the cursor may advance.
+   *
+   * `{ maxRatio }` (E8) is a middle ground: tolerate rejections (advance the cursor)
+   * ONLY while the reject ratio over the window stays at or below `maxRatio`
+   * (rejected / attempted, 0..1). Above it, revert to the strict behaviour and HOLD
+   * the cursor — a guard-rail so a suddenly-bad batch is not waved through blindly.
+   * `true` is equivalent to `{ maxRatio: 1 }`; `false`/omitted keeps the strict hold.
    */
-  tolerateRejects?: boolean;
+  tolerateRejects?: boolean | { maxRatio: number };
   enabled(settings: S): boolean;
   /** For 'per-source': the source keys to iterate over (e.g. store ids). */
   sources?(ctx: IntegrationContext<S>): Promise<string[]> | string[];

@@ -3,7 +3,7 @@ import { openDatabase } from '../store/db.js';
 import { createRepositories } from '../store/repositories.js';
 import { SecretCipher } from '../security/crypto.js';
 import { createLogger, type LogLine } from '../logging/logger.js';
-import { runIntegrationSync, computeWindow, backoffWindowMs } from './engine.js';
+import { runIntegrationSync, computeWindow, backoffWindowMs, rejectsTolerated } from './engine.js';
 import { makeWithSource } from '../sdk/source-scope.js';
 import { makeCustomData } from '../sdk/custom-data-scope.js';
 import { makeSendBulk, type SendBulk } from '../sdk/send-bulk.js';
@@ -312,6 +312,61 @@ describe('runIntegrationSync - E2 "silent step" warning', () => {
     };
     await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
     expect(lines.find((l) => l.message.includes('without advanceCursorTo'))).toBeUndefined();
+  });
+});
+
+describe('rejectsTolerated (E8)', () => {
+  it('false/undefined never tolerates; true always tolerates', () => {
+    expect(rejectsTolerated(undefined, 1, 10)).toBe(false);
+    expect(rejectsTolerated(false, 1, 10)).toBe(false);
+    expect(rejectsTolerated(true, 5, 5)).toBe(true);
+  });
+
+  it('{ maxRatio } tolerates within budget, holds beyond it', () => {
+    // 1 rejected of 10 attempted (9 accepted + 1 rejected) -> ratio 0.1
+    expect(rejectsTolerated({ maxRatio: 0.2 }, 1, 9)).toBe(true);
+    // 5 rejected of 10 attempted -> ratio 0.5 > 0.2 -> hold
+    expect(rejectsTolerated({ maxRatio: 0.2 }, 5, 5)).toBe(false);
+    // exactly at the boundary -> tolerated (<=)
+    expect(rejectsTolerated({ maxRatio: 0.5 }, 5, 5)).toBe(true);
+  });
+});
+
+describe('runIntegrationSync - E8 tolerateRejects ratio', () => {
+  const rejectingStep = (rejectCount: number, accepted: number, policy: boolean | { maxRatio: number }): SyncStep<Record<string, never>> => ({
+    entity: 'products',
+    cursorScope: 'global',
+    tolerateRejects: policy,
+    enabled: () => true,
+    run: async (ctx) => {
+      const total = rejectCount + accepted;
+      await ctx.sendBulk(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (_c, items: any[]) =>
+          Promise.resolve({
+            ok: true,
+            statusCode: 200,
+            data: { sent_count: accepted, rejected_count: rejectCount, rejected_items: items.slice(0, rejectCount) },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any),
+        Array.from({ length: total }, (_v, i) => ({ id: i })),
+      );
+      return { items: accepted, errors: [], advanceCursorTo: at };
+    },
+  });
+
+  it('advances when the reject ratio is within maxRatio', async () => {
+    const { repos, base, deps } = setup();
+    const sum = await runIntegrationSync({ syncSteps: [rejectingStep(1, 9, { maxRatio: 0.2 })] }, base, deps, { now: () => at });
+    expect(sum.status).toBe('ok');
+    expect(repos.cursors.get('inst', 'products', '')?.last_synced_at).toBe(at.toISOString());
+  });
+
+  it('holds the cursor when the reject ratio exceeds maxRatio', async () => {
+    const { repos, base, deps } = setup();
+    const sum = await runIntegrationSync({ syncSteps: [rejectingStep(5, 5, { maxRatio: 0.2 })] }, base, deps, { now: () => at });
+    expect(sum.status).toBe('partial');
+    expect(repos.cursors.get('inst', 'products', '')?.last_synced_at).toBeNull();
   });
 });
 

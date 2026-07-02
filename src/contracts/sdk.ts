@@ -80,14 +80,22 @@ export interface NewCustomDataDefinition {
   }>;
 }
 
-/** Order status to provision (declaration). */
+/**
+ * Order status to provision (declaration).
+ *
+ * `status_id`, `lang` and `name` are the AUTHORING essentials. The technical
+ * bookkeeping fields (`is_deleted`, `created_at`, `updated_at`) are OPTIONAL (E11):
+ * the kit fills sensible defaults at provisioning time (`is_deleted: false`,
+ * timestamps: now), so an author no longer has to hand-write ceremony the API needs
+ * but the integration doesn't care about. Supplying them explicitly still works.
+ */
 export interface SpmOrderStatus {
   status_id: string;
   lang: string;
   name: string;
-  is_deleted: boolean;
-  created_at: string;
-  updated_at: string;
+  is_deleted?: boolean;
+  created_at?: string;
+  updated_at?: string;
   id_data_source?: number;
 }
 

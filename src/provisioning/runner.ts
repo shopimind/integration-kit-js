@@ -71,7 +71,16 @@ export async function runProvisioning(
 
   if (plan.orderStatuses && plan.orderStatuses.length > 0) {
     try {
-      const env = await SpmOrdersStatuses.bulkSave(client, plan.orderStatuses, { chunk: true });
+      // E11 — fill the technical bookkeeping fields the API needs but the author
+      // should not have to hand-write. Explicit values are preserved.
+      const nowIso = new Date().toISOString();
+      const statuses = plan.orderStatuses.map((s) => ({
+        ...s,
+        is_deleted: s.is_deleted ?? false,
+        created_at: s.created_at ?? nowIso,
+        updated_at: s.updated_at ?? nowIso,
+      }));
+      const env = await SpmOrdersStatuses.bulkSave(client, statuses, { chunk: true });
       result.orderStatuses = SpmHelpers.extractCounts(env).sent;
     } catch (e) {
       result.errors.push(`order statuses: ${errMsg(e)}`);

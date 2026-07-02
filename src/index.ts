@@ -62,6 +62,7 @@ export * from './http/routes.js';
 export * from './runtime/create-app.js';
 export * from './runtime/rate-limiter.js';
 export * from './runtime/health.js';
+export * from './runtime/outbound.js';
 
 // Test helpers
 export * from './testing/harness.js';

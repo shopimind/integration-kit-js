@@ -9,7 +9,7 @@ import type { Integration, IntegrationContext } from '../integration/types.js';
 import { SpmClient, type SpmHttpClient } from '@shopimind/sdk-js';
 import type { Repositories } from '../store/repositories.js';
 import type { Logger } from '../logging/logger.js';
-import { verifyShopimindSignature, type SignatureOptions } from '../security/signature.js';
+import { verifyShopimindSignatureMulti } from '../security/signature.js';
 import { redact } from '../security/redaction.js';
 import { saveConfigs, loadConfigs, sensitiveKeys } from '../config/config-store.js';
 import { runProvisioning } from '../provisioning/runner.js';
@@ -44,7 +44,12 @@ export const PROVISIONING_KEY = '__provisioning';
 export interface DispatcherDeps<S> {
   integration: Integration<S>;
   repos: Repositories;
-  secret: string;
+  /**
+   * Webhook signing secret(s). A single string is the common case; an array opens a
+   * rotation window (E6) where a request signed with ANY listed secret passes —
+   * used while swapping `current` -> `next`. Backward compatible with a plain string.
+   */
+  secret: string | string[];
   toleranceSeconds?: number;
   logger: Logger;
   /** Builds the ShopiMind SDK client for an access_token. */
@@ -99,10 +104,11 @@ export async function handleWebhook<S>(
   headers: Record<string, string | string[] | undefined>,
   deps: DispatcherDeps<S>,
 ): Promise<HttpResult> {
-  const sigOpts: SignatureOptions = { secret: deps.secret };
-  if (deps.toleranceSeconds != null) sigOpts.toleranceSeconds = deps.toleranceSeconds;
-  if (deps.now) sigOpts.now = deps.now;
-  const sig = verifyShopimindSignature(rawBody, headers, sigOpts);
+  // E6 — verify against one or several secrets (rotation window).
+  const sig = verifyShopimindSignatureMulti(rawBody, headers, deps.secret, {
+    ...(deps.toleranceSeconds != null ? { toleranceSeconds: deps.toleranceSeconds } : {}),
+    ...(deps.now ? { now: deps.now } : {}),
+  });
 
   let payload: LifecycleRawPayload;
   try {

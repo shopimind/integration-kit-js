@@ -3,6 +3,7 @@ import { makeTestApp } from '../testing/harness.js';
 import { defineIntegration } from '../integration/define-integration.js';
 import { createIntegrationApp } from './create-app.js';
 import { createLogger } from '../logging/logger.js';
+import { signShopimindBody } from '../security/signature.js';
 import { randomBytes } from 'node:crypto';
 import type { Integration } from '../integration/types.js';
 
@@ -120,6 +121,43 @@ describe('HTTP runtime (server.inject)', () => {
     const body = JSON.parse(ok.payload);
     expect(body.items).toHaveLength(1);
     expect(body.items[0].entity).toBe('orders');
+    await app.stop();
+  });
+
+  it('E6: accepts a webhook signed with EITHER secret during a rotation window', async () => {
+    const app = createIntegrationApp(integration, {
+      databasePath: ':memory:',
+      webhookSecret: ['old_secret', 'new_secret'], // rotation window
+      credentialsKey: randomBytes(32).toString('hex'),
+      autoBackfillOnActivate: false,
+      autoSync: false,
+      now: () => 1_700_000_000_000,
+      logger: createLogger({ sink: () => {} }),
+    });
+    const ts = 1_700_000_000;
+    const sign = (secret: string, payload: object): { body: string; headers: Record<string, string> } => {
+      const body = JSON.stringify(payload);
+      return {
+        body,
+        headers: {
+          'content-type': 'application/json',
+          'x-shopimind-timestamp': String(ts),
+          'x-shopimind-signature': signShopimindBody(body, secret, ts),
+        },
+      };
+    };
+    const withOld = sign('old_secret', { event: 'integration.installed', installation_id: 'r1', access_token: 'int_T', configs: {} });
+    const rOld = await app.server.inject({ method: 'POST', url: '/webhook/receive', payload: withOld.body, headers: withOld.headers });
+    expect(rOld.statusCode).toBe(200);
+    expect(JSON.parse(rOld.payload).success).toBe(true);
+
+    const withNew = sign('new_secret', { event: 'integration.installed', installation_id: 'r2', access_token: 'int_T', configs: {} });
+    const rNew = await app.server.inject({ method: 'POST', url: '/webhook/receive', payload: withNew.body, headers: withNew.headers });
+    expect(JSON.parse(rNew.payload).success).toBe(true);
+
+    const withBad = sign('unknown_secret', { event: 'integration.installed', installation_id: 'r3' });
+    const rBad = await app.server.inject({ method: 'POST', url: '/webhook/receive', payload: withBad.body, headers: withBad.headers });
+    expect(rBad.statusCode).toBe(401);
     await app.stop();
   });
 

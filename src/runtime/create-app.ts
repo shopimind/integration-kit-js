@@ -19,7 +19,12 @@ import { buildRoutes } from '../http/routes.js';
 
 export interface CreateAppOptions<S> {
   databasePath: string;
-  webhookSecret: string;
+  /**
+   * Webhook signing secret(s). A single string is the common case; pass an array to
+   * open a secret ROTATION window (E6) — a webhook signed with ANY listed secret is
+   * accepted while you swap `current` -> `next`. Backward compatible with a string.
+   */
+  webhookSecret: string | string[];
   /**
    * Override for the ShopiMind SDK base URL (otherwise env `SHOPIMIND_CORE_API_BASE`,
    * then `https://core.shopimind.com`). Useful in tests / preprod.

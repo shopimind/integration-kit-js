@@ -8,7 +8,7 @@ import {
   type DispatcherDeps,
 } from '../lifecycle/dispatcher.js';
 import { handleInbound, type InboundDeps } from '../lifecycle/inbound.js';
-import { verifyShopimindSignature, type SignatureOptions } from '../security/signature.js';
+import { verifyShopimindSignatureMulti } from '../security/signature.js';
 
 export interface RouteDeps<S> {
   dispatcher: DispatcherDeps<S>;
@@ -63,11 +63,16 @@ const rawBody = (req: Request): string => {
   return Buffer.isBuffer(p) ? p.toString('utf8') : String(p);
 };
 
-function sigOptsOf<S>(d: DispatcherDeps<S>): SignatureOptions {
-  const o: SignatureOptions = { secret: d.secret };
-  if (d.toleranceSeconds != null) o.toleranceSeconds = d.toleranceSeconds;
-  if (d.now) o.now = d.now;
-  return o;
+/** Verifies a ShopiMind signature against the dispatcher's secret(s) (E6 rotation-aware). */
+function verifyDispatcherSignature<S>(
+  d: DispatcherDeps<S>,
+  body: string,
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  return verifyShopimindSignatureMulti(body, headers, d.secret, {
+    ...(d.toleranceSeconds != null ? { toleranceSeconds: d.toleranceSeconds } : {}),
+    ...(d.now ? { now: d.now } : {}),
+  }).ok;
 }
 
 function parseConfigs(body: string): RawConfigs {
@@ -115,8 +120,8 @@ export function buildRoutes<S>(deps: RouteDeps<S>): ServerRoute[] {
       options: { payload: smallPayload },
       handler: async (req: Request, h: ResponseToolkit) => {
         const body = rawBody(req);
-        const sig = verifyShopimindSignature(body, req.headers, sigOptsOf(deps.dispatcher));
-        if (!sig.ok) return h.response({ success: false, error: 'unauthorized' }).code(401);
+        if (!verifyDispatcherSignature(deps.dispatcher, body, req.headers))
+          return h.response({ success: false, error: 'unauthorized' }).code(401);
         return h.response(await handleTestConnection(parseConfigs(body), deps.dispatcher)).code(200);
       },
     },
@@ -126,8 +131,8 @@ export function buildRoutes<S>(deps: RouteDeps<S>): ServerRoute[] {
       options: { payload: smallPayload },
       handler: async (req: Request, h: ResponseToolkit) => {
         const body = rawBody(req);
-        const sig = verifyShopimindSignature(body, req.headers, sigOptsOf(deps.dispatcher));
-        if (!sig.ok) return h.response({ success: false, error: 'unauthorized' }).code(401);
+        if (!verifyDispatcherSignature(deps.dispatcher, body, req.headers))
+          return h.response({ success: false, error: 'unauthorized' }).code(401);
         const resource = String(req.params.resource);
         return h.response(await handleRemoteData(resource, parseConfigs(body), deps.dispatcher)).code(200);
       },

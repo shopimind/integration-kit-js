@@ -54,6 +54,26 @@ describe('runProvisioning', () => {
     expect(r.defIds.pos_profile).toBe(20); // the following resources still succeeded
   });
 
+  it('E11: fills default technical fields on order statuses (is_deleted/created_at/updated_at)', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let sent: any[] | null = null;
+    const client = mockClient((req) => {
+      if (req.method === 'post' && req.url === 'orders-statuses') {
+        sent = req.body;
+        return { body: { sent_count: 1, rejected_count: 0, failed_count: 0, rejected_items: [] } };
+      }
+      return okHandler(req);
+    });
+    const r = await runProvisioning(client, {
+      // Only the authoring essentials — technical fields omitted (E11).
+      orderStatuses: [{ status_id: 'done', lang: 'fr', name: 'Terminé' }],
+    });
+    expect(r.orderStatuses).toBe(1);
+    expect(sent?.[0]?.is_deleted).toBe(false);
+    expect(typeof sent?.[0]?.created_at).toBe('string');
+    expect(typeof sent?.[0]?.updated_at).toBe('string');
+  });
+
   it('ensureEvent tolerates a 409 (idempotent)', async () => {
     const r = await runProvisioning(
       mockClient((req) => {
