@@ -36,14 +36,27 @@ export interface CursorRow {
   last_status: string | null;
   last_error: string | null;
   items: number;
+  /** Consecutive failed/held runs for this cursor (E3). Reset to 0 on a clean advance. */
+  consecutive_failures: number;
   updated_at: string;
 }
 
 export interface CursorWrite {
-  last_synced_at: string;
+  /**
+   * Upper bound the cursor advanced to (ISO 8601), or `null` when the cursor is
+   * NOT advancing (a failure row that preserves the previous value, possibly
+   * never-synced). Nullable by design — do not cast a null away.
+   */
+  last_synced_at: string | null;
   last_status?: string;
   last_error?: string | null;
   items?: number;
+  /**
+   * Absolute value to persist in `consecutive_failures` (E3). The engine sets 0 on
+   * a clean advance and the incremented count on a failure/hold. Omitted -> left
+   * unchanged (COALESCE), so callers that do not track it keep the old value.
+   */
+  consecutive_failures?: number;
 }
 
 export interface SyncRunRow {
@@ -65,4 +78,16 @@ export interface InboundEventRow {
   error: string | null;
   received_at: string;
   processed_at: string | null;
+}
+
+/** A dead-lettered item the ShopiMind API REJECTED during a bulk push (E4). */
+export interface RejectedItemRow {
+  id: number;
+  installation_id: string;
+  run_id: number | null;
+  entity: string | null;
+  source_key: string | null;
+  payload_json: string | null;
+  reason: string | null;
+  created_at: string;
 }

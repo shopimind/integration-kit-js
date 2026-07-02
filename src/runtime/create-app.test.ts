@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { makeTestApp } from '../testing/harness.js';
 import { defineIntegration } from '../integration/define-integration.js';
+import { createIntegrationApp } from './create-app.js';
+import { createLogger } from '../logging/logger.js';
+import { randomBytes } from 'node:crypto';
 import type { Integration } from '../integration/types.js';
 
 type S = { ok: boolean };
@@ -15,11 +18,12 @@ const integration: Integration<S> = defineIntegration({
 });
 
 describe('HTTP runtime (server.inject)', () => {
-  it('GET /health -> 200', async () => {
+  it('GET /health -> 200 (status ok)', async () => {
     const app = makeTestApp(integration);
     const res = await app.server.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.payload)).toEqual({ status: 'ok' });
+    // E5 enriched the shape; the coarse contract remains `status: 'ok'` on a healthy probe.
+    expect(JSON.parse(res.payload).status).toBe('ok');
     await app.stop();
   });
 
@@ -63,6 +67,59 @@ describe('HTTP runtime (server.inject)', () => {
     const res = await app.server.inject({ method: 'POST', url: '/webhook/test-connection', payload: body, headers });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.payload).success).toBe(true);
+    await app.stop();
+  });
+
+  it('GET /health enriched -> 200 { status: ok } with DB ping + counters (E5)', async () => {
+    const app = makeTestApp(integration);
+    const res = await app.server.inject({ method: 'GET', url: '/health' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.payload);
+    expect(body.status).toBe('ok');
+    expect(body.db).toBe('ok');
+    expect(body).toHaveProperty('cursors_in_error', 0);
+    expect(body).toHaveProperty('active_installations');
+    await app.stop();
+  });
+
+  it('GET /admin/overview requires the admin token, returns JSON synthesis (E5)', async () => {
+    const app = createIntegrationApp(integration, {
+      databasePath: ':memory:',
+      webhookSecret: 'whsec',
+      credentialsKey: randomBytes(32).toString('hex'),
+      adminToken: 'admintok',
+      autoBackfillOnActivate: false,
+      autoSync: false,
+      logger: createLogger({ sink: () => {} }),
+    });
+    const noAuth = await app.server.inject({ method: 'GET', url: '/admin/overview' });
+    expect(noAuth.statusCode).toBe(401);
+    const ok = await app.server.inject({ method: 'GET', url: '/admin/overview', headers: { 'x-admin-token': 'admintok' } });
+    expect(ok.statusCode).toBe(200);
+    const body = JSON.parse(ok.payload);
+    expect(body).toHaveProperty('installations');
+    expect(body).toHaveProperty('recent_webhooks');
+    await app.stop();
+  });
+
+  it('GET /admin/installations/{id}/rejected returns dead-lettered items (E4, admin)', async () => {
+    const app = createIntegrationApp(integration, {
+      databasePath: ':memory:',
+      webhookSecret: 'whsec',
+      credentialsKey: randomBytes(32).toString('hex'),
+      adminToken: 'admintok',
+      autoBackfillOnActivate: false,
+      autoSync: false,
+      logger: createLogger({ sink: () => {} }),
+    });
+    app.repos.rejectedItems.add({ installation_id: 'inst1', run_id: 7, entity: 'orders', payload_json: '{"id":1}', reason: 'bad' });
+    const noAuth = await app.server.inject({ method: 'GET', url: '/admin/installations/inst1/rejected' });
+    expect(noAuth.statusCode).toBe(401);
+    const ok = await app.server.inject({ method: 'GET', url: '/admin/installations/inst1/rejected', headers: { 'x-admin-token': 'admintok' } });
+    expect(ok.statusCode).toBe(200);
+    const body = JSON.parse(ok.payload);
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].entity).toBe('orders');
     await app.stop();
   });
 

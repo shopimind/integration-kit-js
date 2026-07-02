@@ -7,6 +7,7 @@ import type {
   CursorWrite,
   SyncRunRow,
   InboundEventRow,
+  RejectedItemRow,
 } from './types.js';
 
 const nn = <T>(v: T | undefined): T | null => (v === undefined ? null : v);
@@ -118,6 +119,14 @@ export class WebhookLogRepo {
       .prepare(`DELETE FROM webhook_log WHERE created_at < datetime('now', @cutoff)`)
       .run({ cutoff: `-${days} days` }).changes;
   }
+
+  /** Most recent webhook log entries (newest first) — for /admin/overview (E5). */
+  recent(limit = 20): Array<{ event: string | null; installation_id: string | null; signature_ok: number; created_at: string }> {
+    const capped = Math.max(1, Math.min(limit, 200));
+    return this.db
+      .prepare('SELECT event, installation_id, signature_ok, created_at FROM webhook_log ORDER BY id DESC LIMIT ?')
+      .all(capped) as Array<{ event: string | null; installation_id: string | null; signature_ok: number; created_at: string }>;
+  }
 }
 
 /** Replay protection for lifecycle webhooks (key derived from the signature). */
@@ -164,14 +173,18 @@ export class CursorRepo {
     this.db
       .prepare(
         `INSERT INTO sync_cursor
-           (installation_id, entity, source_key, last_synced_at, last_status, last_error, items, updated_at)
+           (installation_id, entity, source_key, last_synced_at, last_status, last_error, items,
+            consecutive_failures, updated_at)
          VALUES
-           (@installation_id, @entity, @source_key, @last_synced_at, @last_status, @last_error, @items, datetime('now'))
+           (@installation_id, @entity, @source_key, @last_synced_at, @last_status, @last_error, @items,
+            COALESCE(@consecutive_failures, 0), datetime('now'))
          ON CONFLICT(installation_id, entity, source_key) DO UPDATE SET
            last_synced_at = excluded.last_synced_at,
            last_status    = excluded.last_status,
            last_error     = excluded.last_error,
            items          = excluded.items,
+           -- Omitted (@consecutive_failures IS NULL) -> keep the existing counter.
+           consecutive_failures = COALESCE(@consecutive_failures, sync_cursor.consecutive_failures),
            updated_at     = datetime('now')`,
       )
       .run({
@@ -182,7 +195,23 @@ export class CursorRepo {
         last_status: nn(w.last_status),
         last_error: nn(w.last_error),
         items: w.items ?? 0,
+        consecutive_failures: nn(w.consecutive_failures),
       });
+  }
+
+  /** All cursors for an installation (for /health, /admin/overview). */
+  listByInstallation(installationId: string): CursorRow[] {
+    return this.db
+      .prepare('SELECT * FROM sync_cursor WHERE installation_id = ? ORDER BY entity, source_key')
+      .all(installationId) as CursorRow[];
+  }
+
+  /** Number of cursors currently in the `error` status (health signal). */
+  countInError(): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM sync_cursor WHERE last_status = 'error'`)
+      .get() as { n: number };
+    return row.n;
   }
 }
 
@@ -314,6 +343,54 @@ export class InboundEventRepo {
   }
 }
 
+/**
+ * Dead-letter of per-item REJECTIONS (E4). The engine records here what the
+ * ShopiMind API refused during a bulk push (validation), capped per run so a
+ * poison batch cannot flood the store; an operator inspects/replays via the admin
+ * endpoint. Subject to the same retention purge as the other log tables.
+ */
+export class RejectedItemRepo {
+  constructor(private readonly db: DatabaseT.Database) {}
+
+  add(entry: {
+    installation_id: string;
+    run_id?: number | null;
+    entity?: string | null;
+    source_key?: string | null;
+    payload_json: string;
+    reason?: string | null;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO rejected_item (installation_id, run_id, entity, source_key, payload_json, reason)
+         VALUES (@installation_id, @run_id, @entity, @source_key, @payload_json, @reason)`,
+      )
+      .run({
+        installation_id: entry.installation_id,
+        run_id: nn(entry.run_id),
+        entity: nn(entry.entity),
+        source_key: nn(entry.source_key),
+        payload_json: entry.payload_json,
+        reason: nn(entry.reason),
+      });
+  }
+
+  /** Most recent rejected items for an installation, newest first (bounded). */
+  listByInstallation(installationId: string, limit = 100): RejectedItemRow[] {
+    const capped = Math.max(1, Math.min(limit, 500));
+    return this.db
+      .prepare('SELECT * FROM rejected_item WHERE installation_id = ? ORDER BY id DESC LIMIT ?')
+      .all(installationId, capped) as RejectedItemRow[];
+  }
+
+  /** Retention: deletes rejected-item rows older than `days` days. Returns rows removed. */
+  purgeOlderThan(days: number): number {
+    return this.db
+      .prepare(`DELETE FROM rejected_item WHERE created_at < datetime('now', @cutoff)`)
+      .run({ cutoff: `-${days} days` }).changes;
+  }
+}
+
 export interface Repositories {
   installs: InstallRepo;
   webhookLog: WebhookLogRepo;
@@ -322,6 +399,7 @@ export interface Repositories {
   runs: RunRepo;
   state: IntegrationStateRepo;
   inboundEvents: InboundEventRepo;
+  rejectedItems: RejectedItemRepo;
 }
 
 export function createRepositories(db: DatabaseT.Database, cipher: SecretCipher): Repositories {
@@ -333,5 +411,6 @@ export function createRepositories(db: DatabaseT.Database, cipher: SecretCipher)
     runs: new RunRepo(db),
     state: new IntegrationStateRepo(db, cipher),
     inboundEvents: new InboundEventRepo(db),
+    rejectedItems: new RejectedItemRepo(db),
   };
 }

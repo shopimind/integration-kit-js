@@ -3,7 +3,7 @@ import { openDatabase } from '../store/db.js';
 import { createRepositories } from '../store/repositories.js';
 import { SecretCipher } from '../security/crypto.js';
 import { createLogger, type LogLine } from '../logging/logger.js';
-import { runIntegrationSync, computeWindow } from './engine.js';
+import { runIntegrationSync, computeWindow, backoffWindowMs } from './engine.js';
 import { makeWithSource } from '../sdk/source-scope.js';
 import { makeCustomData } from '../sdk/custom-data-scope.js';
 import { makeSendBulk, type SendBulk } from '../sdk/send-bulk.js';
@@ -39,6 +39,7 @@ function setup(sink: (line: LogLine) => void = () => {}) {
     runs: repos.runs,
     makeSource: (sb: SendBulk) => makeWithSource(repos.state, 'inst', PROVISIONING_KEY, sb),
     makeCustomData: (sb: SendBulk) => makeCustomData(repos.state, 'inst', PROVISIONING_KEY, sb, spm),
+    rejectedItems: repos.rejectedItems,
   };
   return { repos, base, deps };
 }
@@ -311,6 +312,120 @@ describe('runIntegrationSync - E2 "silent step" warning', () => {
     };
     await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
     expect(lines.find((l) => l.message.includes('without advanceCursorTo'))).toBeUndefined();
+  });
+});
+
+describe('backoffWindowMs (E3)', () => {
+  it('is 0 with no failures, then exponential (2^(k-1) minutes), capped at 24h', () => {
+    expect(backoffWindowMs(0)).toBe(0);
+    expect(backoffWindowMs(1)).toBe(60_000); // 1 min
+    expect(backoffWindowMs(2)).toBe(120_000); // 2 min
+    expect(backoffWindowMs(3)).toBe(240_000); // 4 min
+    expect(backoffWindowMs(100)).toBe(24 * 60 * 60_000); // capped at 24h
+  });
+});
+
+describe('runIntegrationSync - E3 failure escalation & backoff', () => {
+  it('counts consecutive failures and resets on a clean advance', async () => {
+    const { repos, base, deps } = setup();
+    const failing: SyncStep<Record<string, never>> = {
+      entity: 'orders',
+      cursorScope: 'global',
+      enabled: () => true,
+      run: async () => ({ items: 0, errors: ['boom'] }),
+    };
+    // Force `full` so backoff never skips (we want the step to actually run each time).
+    await runIntegrationSync({ syncSteps: [failing] }, base, deps, { now: () => at, fullBackfill: true });
+    expect(repos.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(1);
+    await runIntegrationSync({ syncSteps: [failing] }, base, deps, { now: () => at, fullBackfill: true });
+    expect(repos.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(2);
+
+    const clean: SyncStep<Record<string, never>> = {
+      entity: 'orders',
+      cursorScope: 'global',
+      enabled: () => true,
+      run: async () => ({ items: 3, errors: [], advanceCursorTo: at }),
+    };
+    await runIntegrationSync({ syncSteps: [clean] }, base, deps, { now: () => at, fullBackfill: true });
+    expect(repos.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(0);
+  });
+
+  it('logs ERROR at the 3rd consecutive failure', async () => {
+    const lines: LogLine[] = [];
+    const { base, deps } = setup((l) => lines.push(l));
+    const failing: SyncStep<Record<string, never>> = {
+      entity: 'orders',
+      cursorScope: 'global',
+      enabled: () => true,
+      run: async () => ({ items: 0, errors: ['boom'] }),
+    };
+    for (let i = 0; i < 2; i += 1) {
+      lines.length = 0;
+      await runIntegrationSync({ syncSteps: [failing] }, base, deps, { now: () => at, fullBackfill: true });
+    }
+    // 1st and 2nd failures: no ERROR escalation yet.
+    expect(lines.find((l) => l.level === 'error' && l.message.includes('failing repeatedly'))).toBeUndefined();
+    lines.length = 0;
+    await runIntegrationSync({ syncSteps: [failing] }, base, deps, { now: () => at, fullBackfill: true });
+    // 3rd failure escalates to ERROR.
+    expect(lines.find((l) => l.level === 'error' && l.message.includes('failing repeatedly'))).toBeDefined();
+  });
+
+  it('skips a step in backoff on an incremental tick (cursor untouched)', async () => {
+    const { repos, base, deps } = setup();
+    let ran = 0;
+    const failing: SyncStep<Record<string, never>> = {
+      entity: 'orders',
+      cursorScope: 'global',
+      enabled: () => true,
+      run: async () => {
+        ran += 1;
+        return { items: 0, errors: ['boom'] };
+      },
+    };
+    const clock = () => new Date(Date.now()); // real time ~ the cursor's updated_at
+    // First tick: the step fails (consecutive_failures -> 1, updated_at ~ now).
+    await runIntegrationSync({ syncSteps: [failing] }, base, deps, { now: clock });
+    expect(ran).toBe(1);
+    // Second tick immediately after (well within the 1-minute backoff): SKIPPED.
+    const sum = await runIntegrationSync({ syncSteps: [failing] }, base, deps, { now: clock });
+    expect(ran).toBe(1); // not re-run
+    expect(sum.steps[0]?.skippedBackoff).toBe(true);
+    // Cursor untouched: still 1 failure, no error added to the run.
+    expect(repos.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(1);
+    expect(sum.errors).toHaveLength(0);
+  });
+});
+
+describe('runIntegrationSync - E4 dead-letter of rejects', () => {
+  it('records rejected items to the dead-letter sink (bounded per run)', async () => {
+    const { repos, base, deps } = setup();
+    const step: SyncStep<Record<string, never>> = {
+      entity: 'products',
+      cursorScope: 'global',
+      tolerateRejects: true,
+      enabled: () => true,
+      run: async (ctx) => {
+        await ctx.sendBulk(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (_c, items: any[]) =>
+            Promise.resolve({
+              ok: true,
+              statusCode: 200,
+              data: { sent_count: items.length - 2, rejected_count: 2, rejected_items: [items[0], items[1]] },
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any),
+          [{ id: 1 }, { id: 2 }, { id: 3 }],
+        );
+        return { items: 3, errors: [], advanceCursorTo: at };
+      },
+    };
+    const sum = await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
+    const dead = repos.rejectedItems.listByInstallation('inst');
+    expect(dead).toHaveLength(2);
+    expect(dead[0]?.entity).toBe('products');
+    expect(dead[0]?.run_id).toBe(sum.runId);
+    expect(JSON.parse(dead[1]?.payload_json ?? '{}')).toHaveProperty('id');
   });
 });
 

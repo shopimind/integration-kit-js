@@ -13,6 +13,7 @@ import { makeWithSource } from '../sdk/source-scope.js';
 import { makeCustomData } from '../sdk/custom-data-scope.js';
 import { makeSendBulk } from '../sdk/send-bulk.js';
 import { createRateLimiter } from './rate-limiter.js';
+import { buildHealthReport, buildOverview } from './health.js';
 import { createServer } from '../http/server.js';
 import { buildRoutes } from '../http/routes.js';
 
@@ -142,6 +143,8 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
           runs: repos.runs,
           makeSource: (sb) => makeWithSource(repos.state, id, PROVISIONING_KEY, sb),
           makeCustomData: (sb) => makeCustomData(repos.state, id, PROVISIONING_KEY, sb, base.spm),
+          // E4 — feed the dead-letter sink so rejected items survive the run.
+          rejectedItems: repos.rejectedItems,
         },
         { fullBackfill: o?.full ?? false, backfillDays },
       );
@@ -188,6 +191,11 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
       webhookRateLimit,
       runSyncForInstall: (id, full) => runSyncOnce(id, { full }),
       recentRuns: (id) => repos.runs.recent(id),
+      // E4 — dead-lettered rejects for an installation (admin, bounded).
+      rejectedItems: (id, limit) => repos.rejectedItems.listByInstallation(id, limit),
+      // E5 — enriched health probe + admin overview.
+      healthReport: () => buildHealthReport(db, repos, opts.now ? opts.now() : Date.now()),
+      overview: () => buildOverview(repos, opts.now ? opts.now() : Date.now()),
       inbound: {
         integration,
         repos,
@@ -235,8 +243,15 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
       const log = repos.webhookLog.purgeOlderThan(retentionDays);
       const seen = repos.webhookSeen.purgeOlderThan(retentionDays);
       const inbound = repos.inboundEvents.purgeOlderThan(retentionDays);
-      if (log + seen + inbound > 0) {
-        logger.info('retention purge', { webhook_log: log, webhook_seen: seen, inbound_event: inbound, retentionDays });
+      const rejected = repos.rejectedItems.purgeOlderThan(retentionDays); // E4 dead-letter (90j)
+      if (log + seen + inbound + rejected > 0) {
+        logger.info('retention purge', {
+          webhook_log: log,
+          webhook_seen: seen,
+          inbound_event: inbound,
+          rejected_item: rejected,
+          retentionDays,
+        });
       }
     } catch (e) {
       logger.error('retention purge failed', { error: e instanceof Error ? e.message : String(e) });

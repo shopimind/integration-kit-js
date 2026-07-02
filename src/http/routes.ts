@@ -23,6 +23,15 @@ export interface RouteDeps<S> {
   webhookRateLimit?(key: string): boolean;
   runSyncForInstall(id: string, full: boolean): Promise<unknown>;
   recentRuns(id: string): unknown;
+  /** E4 — dead-lettered rejected items for an installation (bounded). */
+  rejectedItems?(id: string, limit: number): unknown;
+  /**
+   * E5 — enriched health snapshot (DB ping, run ages, cursors in error). Routes
+   * only reads `status` (to pick 200 vs 503) and forwards the whole object as JSON.
+   */
+  healthReport?(): { status: 'ok' | 'degraded' };
+  /** E5 — JSON overview across installations (admin). */
+  overview?(): object;
 }
 
 /** Ephemeral (per-process) HMAC key to compare the admin token at fixed length. */
@@ -136,7 +145,42 @@ export function buildRoutes<S>(deps: RouteDeps<S>): ServerRoute[] {
     {
       method: 'GET',
       path: '/health',
-      handler: (_req: Request, h: ResponseToolkit) => h.response({ status: 'ok' }).code(200),
+      handler: (_req: Request, h: ResponseToolkit) => {
+        // E5 — enriched health: DB ping + last-run age per active installation +
+        // cursors in error. A degraded snapshot returns 503 so an orchestrator's
+        // readiness/liveness probe (Hiboutik F8) can act on it. UNAUTHENTICATED and
+        // deliberately COARSE (no secrets, no per-shop identifiers beyond ids) — it
+        // is a probe endpoint. If no report provider is wired, fall back to the
+        // original always-ok shape (backward compatible).
+        if (!deps.healthReport) return h.response({ status: 'ok' }).code(200);
+        const report = deps.healthReport();
+        return h.response(report).code(report.status === 'degraded' ? 503 : 200);
+      },
+    },
+    {
+      method: 'GET',
+      path: '/admin/overview',
+      handler: (req: Request, h: ResponseToolkit) => {
+        if (deps.adminRateLimit && !deps.adminRateLimit(clientIp(req))) return h.response({ success: false, error: 'rate_limited' }).code(429);
+        if (!adminOk(req, deps.adminToken)) return h.response({ success: false, error: 'unauthorized' }).code(401);
+        if (!deps.overview) return h.response({ success: false, error: 'not_supported' }).code(501);
+        return h.response(deps.overview()).code(200);
+      },
+    },
+    {
+      method: 'GET',
+      path: '/admin/installations/{id}/rejected',
+      handler: (req: Request, h: ResponseToolkit) => {
+        if (deps.adminRateLimit && !deps.adminRateLimit(clientIp(req))) return h.response({ success: false, error: 'rate_limited' }).code(429);
+        if (!adminOk(req, deps.adminToken)) return h.response({ success: false, error: 'unauthorized' }).code(401);
+        if (!deps.rejectedItems) return h.response({ success: false, error: 'not_supported' }).code(501);
+        const id = String(req.params.id ?? '');
+        if (!id) return h.response({ success: false, error: 'invalid_id' }).code(400);
+        // Bounded: default 100, hard cap 500 (the repo clamps again defensively).
+        const rawLimit = Number((req.query as Record<string, unknown> | undefined)?.limit ?? 100);
+        const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 500)) : 100;
+        return h.response({ items: deps.rejectedItems(id, limit) }).code(200);
+      },
     },
     {
       method: 'POST',
