@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { openDatabase } from '../store/db.js';
 import { createRepositories } from '../store/repositories.js';
 import { SecretCipher } from '../security/crypto.js';
-import { createLogger } from '../logging/logger.js';
+import { createLogger, type LogLine } from '../logging/logger.js';
 import { runIntegrationSync, computeWindow } from './engine.js';
 import { makeWithSource } from '../sdk/source-scope.js';
 import { makeCustomData } from '../sdk/custom-data-scope.js';
@@ -13,9 +13,9 @@ import type { IntegrationContext, SyncStep } from '../integration/types.js';
 const cipher = new SecretCipher({ key: 'c'.repeat(64) });
 const at = new Date('2026-06-21T00:00:00.000Z');
 
-function setup() {
+function setup(sink: (line: LogLine) => void = () => {}) {
   const repos = createRepositories(openDatabase(':memory:'), cipher);
-  const logger = createLogger({ sink: () => {} });
+  const logger = createLogger({ sink });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const spm = {} as any;
   const base: IntegrationContext<Record<string, never>> = {
@@ -267,6 +267,50 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     // The push throws (transport) -> step error -> cursor NOT advanced despite tolerateRejects.
     expect(sum.status).toBe('partial');
     expect(repos.cursors.get('inst', 'products', '')?.last_synced_at).toBeNull();
+  });
+});
+
+describe('runIntegrationSync - E2 "silent step" warning', () => {
+  it('warns when a clean step returns no advanceCursorTo (forgotten advance)', async () => {
+    const lines: LogLine[] = [];
+    const { base, deps } = setup((l) => lines.push(l));
+    const step: SyncStep<Record<string, never>> = {
+      entity: 'customers',
+      cursorScope: 'global',
+      enabled: () => true,
+      // Clean run (no error) but NO advanceCursorTo -> the window can never move.
+      run: async () => ({ items: 5, errors: [] }),
+    };
+    await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
+    const warn = lines.find((l) => l.level === 'warn' && l.message.includes('without advanceCursorTo'));
+    expect(warn).toBeDefined();
+    expect(warn?.message).toContain("'customers'");
+  });
+
+  it('does NOT warn when a clean step advances the cursor', async () => {
+    const lines: LogLine[] = [];
+    const { base, deps } = setup((l) => lines.push(l));
+    const step: SyncStep<Record<string, never>> = {
+      entity: 'customers',
+      cursorScope: 'global',
+      enabled: () => true,
+      run: async () => ({ items: 5, errors: [], advanceCursorTo: at }),
+    };
+    await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
+    expect(lines.find((l) => l.message.includes('without advanceCursorTo'))).toBeUndefined();
+  });
+
+  it('does NOT warn when a step reports an error (the error, not the missing advance, is the signal)', async () => {
+    const lines: LogLine[] = [];
+    const { base, deps } = setup((l) => lines.push(l));
+    const step: SyncStep<Record<string, never>> = {
+      entity: 'customers',
+      cursorScope: 'global',
+      enabled: () => true,
+      run: async () => ({ items: 0, errors: ['boom'] }),
+    };
+    await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
+    expect(lines.find((l) => l.message.includes('without advanceCursorTo'))).toBeUndefined();
   });
 });
 

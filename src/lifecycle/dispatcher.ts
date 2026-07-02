@@ -1,4 +1,29 @@
-import type { RawConfigs, WebhookResponse, RemoteDataResponse, ConfigSchema } from '../contracts/index.js';
+import type {
+  RawConfigs,
+  WebhookResponse,
+  RemoteDataResponse,
+  ConfigSchema,
+  LifecyclePayload,
+} from '../contracts/index.js';
+
+/** All keys present on ANY member of a (discriminated) union — distributes over `T`. */
+type KeysOfUnion<T> = T extends unknown ? keyof T : never;
+/** The value type of key `K` across every union member that declares it. */
+type ValueOfUnion<T, K extends PropertyKey> = T extends unknown ? (K extends keyof T ? T[K] : never) : never;
+
+/**
+ * Collapses the discriminated {@link LifecyclePayload} union into one flat object
+ * type carrying EVERY member field as optional. `event`/`id_shop_integration` are
+ * dropped so the wire type below can re-declare them with the tolerance the network
+ * forces. (`Partial<Omit<Union, K>>` distributes and keeps only the shared base
+ * fields — these distributive helpers correctly gather each member's own fields.)
+ */
+type AllLifecycleFields = {
+  [K in Exclude<KeysOfUnion<LifecyclePayload>, 'event' | 'id_shop_integration'>]?: ValueOfUnion<
+    LifecyclePayload,
+    K
+  >;
+};
 import type { Integration, IntegrationContext } from '../integration/types.js';
 import { SpmClient, type SpmHttpClient } from '@shopimind/sdk-js';
 import type { Repositories } from '../store/repositories.js';
@@ -34,20 +59,21 @@ export interface HttpResult {
   body: WebhookResponse;
 }
 
-interface LifecycleRawPayload {
+/**
+ * Wire shape of an inbound lifecycle webhook, as parsed from the RAW body BEFORE
+ * any validation. It reuses the public {@link LifecyclePayload} contract but
+ * relaxes it in two ways the network boundary forces on us:
+ *   - `event` is `string` (unknown/garbage events must be handled, not crash),
+ *   - `id_shop_integration` tolerates a `string` (some legacy senders JSON-encode
+ *     the numeric alias as a string).
+ * Consuming the public type here (instead of a private duplicate) means a change
+ * to the author-facing contract is reflected at the dispatch boundary by
+ * construction. `Partial` because a malformed body may omit anything.
+ */
+type LifecycleRawPayload = AllLifecycleFields & {
   event?: string;
-  /** Opaque installation token. */
-  installation_id?: string;
   id_shop_integration?: number | string;
-  shop_domain?: string;
-  shop_name?: string;
-  access_token?: string;
-  configs?: RawConfigs;
-  installed_at?: string;
-  activated_at?: string;
-  deactivated_at?: string;
-  uninstalled_at?: string;
-}
+};
 
 /** Opaque installation id from the payload. */
 function installIdOf(p: LifecycleRawPayload): string | undefined {

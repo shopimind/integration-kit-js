@@ -151,6 +151,18 @@ async function runOneSource<S>(
     result = { items: 0, errors: [`fatal: ${errMsg(e)}`] };
   }
 
+  // A step that finished CLEAN (no error) yet returned no `advanceCursorTo` almost
+  // always means the author forgot to advance: the window will be replayed forever
+  // and the cursor is stuck. This is a silent correctness bug (duplicate work, no
+  // progress), so surface it loudly. A step that legitimately never advances (e.g.
+  // a pure fan-out) can suppress this by returning `advanceCursorTo: ctx.window.until`.
+  if (result.errors.length === 0 && result.advanceCursorTo == null) {
+    base.logger.warn(
+      `sync step '${step.entity}' completed clean without advanceCursorTo — cursor not advanced (window will replay)`,
+      { entity: step.entity, sourceKey, items: result.items },
+    );
+  }
+
   // GOLDEN RULE: do not advance the cursor on (a) a step error OR (b) unhandled
   // rejections (data the API did NOT persist). `tolerateRejects` only lifts (b) — for
   // a windowed stream a PERMANENT rejection ("poison pill") would otherwise freeze the
