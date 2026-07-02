@@ -52,3 +52,39 @@ export function validateProvisioningEvents(events: ReadonlyArray<{ code_name?: s
     }
   }
 }
+
+/** Minimal shape a custom-data definition must satisfy for the E10 guards. */
+interface GuardableDefinition {
+  name: string;
+  fields: Array<{ name: string }>;
+  unique_keys?: string[];
+  relationships?: Array<{ sourceField: string }>;
+}
+
+/**
+ * Structural guards for a custom-data definition (E10). A definition whose
+ * `unique_keys` or `relationships.sourceField` reference a field it does not
+ * declare is a MISCONFIGURATION that the API would reject opaquely at provisioning
+ * time (or, worse, accept and misbehave). Catch it early with a precise message.
+ *
+ * Called by the provisioning runner once the (async) plan is materialized — the
+ * plan is not reachable from the boot-time `validateIntegration`. Kept lenient in
+ * shape (only the checked fields are required) so the runner can pass its own DTO.
+ */
+export function validateCustomDataDefinition(def: GuardableDefinition): void {
+  const fieldNames = new Set(def.fields.map((f) => f.name));
+  for (const key of def.unique_keys ?? []) {
+    if (!fieldNames.has(key)) {
+      throw new Error(
+        `custom data '${def.name}': unique_keys contains '${key}' which is not a declared field`,
+      );
+    }
+  }
+  for (const rel of def.relationships ?? []) {
+    if (!fieldNames.has(rel.sourceField)) {
+      throw new Error(
+        `custom data '${def.name}': relationship sourceField '${rel.sourceField}' is not a declared field`,
+      );
+    }
+  }
+}

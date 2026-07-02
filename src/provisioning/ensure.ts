@@ -55,24 +55,63 @@ function normKey(v: unknown): string {
   return typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim();
 }
 
+/** Extracts a property from a source's `config` (a JSON string), tolerating malformed JSON. */
+function configValue(config: unknown, key: string): string | undefined {
+  if (typeof config !== 'string' || config === '') return undefined;
+  try {
+    const parsed = JSON.parse(config) as Record<string, unknown>;
+    const v = parsed?.[key];
+    return v == null ? undefined : normKey(v);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Finds a data source by `label`, otherwise creates it. Returns its id.
+ * Finds a data source, otherwise creates it. Returns its id.
  *
- * Invariant: `label` is expected to be UNIQUE across an account's data sources;
- * the find-or-create matches on it as a natural key. The comparison is trimmed
- * on both sides so trailing/leading whitespace differences do not spawn a
- * duplicate source.
+ * Matching (E16):
+ *  - if `input.stableConfigKey` is set, match FIRST on `config[stableConfigKey]`
+ *    (a permanent identifier, e.g. the store id) — a source found this way but with
+ *    a DIFFERENT label has its label UPDATED to the new one (a rename no longer
+ *    spawns a duplicate);
+ *  - otherwise (or if no config match), fall back to matching by `label` as a
+ *    natural key (the legacy behaviour, unchanged when `stableConfigKey` is absent).
+ *
+ * Comparisons are trimmed on both sides so incidental whitespace does not spawn a
+ * duplicate source. `stableConfigKey` is kit-only metadata — never sent to the API.
  */
 export async function ensureDataSource(client: SpmHttpClient, input: NewDataSource): Promise<number> {
-  const existing = SpmHelpers.unwrapOrThrow<Array<Record<string, unknown>>>(
-    await SpmDataSources.list(client),
-    'listDataSources',
-  );
+  const existing =
+    SpmHelpers.unwrapOrThrow<Array<Record<string, unknown>>>(
+      await SpmDataSources.list(client),
+      'listDataSources',
+    ) ?? [];
   const wantedLabel = normKey(input.label);
-  const found = (existing ?? []).find((s) => normKey(s.label) === wantedLabel);
+
+  // E16 — stable-key match first (survives a label rename).
+  if (input.stableConfigKey) {
+    const wantedKeyValue = configValue(input.config, input.stableConfigKey);
+    if (wantedKeyValue !== undefined) {
+      const byKey = existing.find((s) => configValue(s.config, input.stableConfigKey as string) === wantedKeyValue);
+      if (byKey) {
+        const id = numId(byKey, 'id_data_source', 'id');
+        // Label drifted (merchant renamed the store) -> update it, do NOT duplicate.
+        if (normKey(byKey.label) !== wantedLabel) {
+          await SpmDataSources.update(client, id, { label: input.label });
+        }
+        return id;
+      }
+    }
+  }
+
+  const found = existing.find((s) => normKey(s.label) === wantedLabel);
   if (found) return numId(found, 'id_data_source', 'id');
+
+  // `stableConfigKey` is authoring-only metadata: strip it from the create DTO.
+  const { stableConfigKey: _drop, ...createDto } = input;
   const created = SpmHelpers.unwrapOrThrow<Record<string, unknown>>(
-    await SpmDataSources.create(client, input),
+    await SpmDataSources.create(client, createDto),
     'createDataSource',
   );
   return numId(created, 'id_data_source', 'id');

@@ -10,6 +10,18 @@ export interface NewDataSource {
   type: string;
   parent_id?: number;
   config?: string;
+  /**
+   * STABLE MATCHING KEY (E16). Name of a property inside the source's `config`
+   * (parsed as JSON) that uniquely and PERMANENTLY identifies this source — e.g.
+   * `'hiboutik_store_id'`. When set, `ensureDataSource` matches an existing source by
+   * `config[stableConfigKey]` FIRST, falling back to the `label` only if no config
+   * match is found. This lets a source survive a LABEL RENAME (a merchant renaming
+   * their store no longer spawns a duplicate; the existing source's label is updated
+   * to the new one). Omit it to keep the legacy label-only behaviour unchanged.
+   *
+   * This field is kit-only authoring metadata: it is NOT forwarded to the API.
+   */
+  stableConfigKey?: string;
 }
 
 /**

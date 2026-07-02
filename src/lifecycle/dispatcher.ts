@@ -5,6 +5,18 @@ import type {
   ConfigSchema,
   LifecyclePayload,
 } from '../contracts/index.js';
+import type { Integration, IntegrationContext } from '../integration/types.js';
+import { SpmClient, type SpmHttpClient } from '@shopimind/sdk-js';
+import type { Repositories } from '../store/repositories.js';
+import type { Logger } from '../logging/logger.js';
+import { verifyShopimindSignature, type SignatureOptions } from '../security/signature.js';
+import { redact } from '../security/redaction.js';
+import { saveConfigs, loadConfigs, sensitiveKeys } from '../config/config-store.js';
+import { runProvisioning } from '../provisioning/runner.js';
+import { ensureInboundSecret } from './inbound.js';
+import { makeWithSource } from '../sdk/source-scope.js';
+import { makeSendBulk } from '../sdk/send-bulk.js';
+import { makeCustomData } from '../sdk/custom-data-scope.js';
 
 /** All keys present on ANY member of a (discriminated) union — distributes over `T`. */
 type KeysOfUnion<T> = T extends unknown ? keyof T : never;
@@ -24,18 +36,6 @@ type AllLifecycleFields = {
     K
   >;
 };
-import type { Integration, IntegrationContext } from '../integration/types.js';
-import { SpmClient, type SpmHttpClient } from '@shopimind/sdk-js';
-import type { Repositories } from '../store/repositories.js';
-import type { Logger } from '../logging/logger.js';
-import { verifyShopimindSignature, type SignatureOptions } from '../security/signature.js';
-import { redact } from '../security/redaction.js';
-import { saveConfigs, loadConfigs, sensitiveKeys } from '../config/config-store.js';
-import { runProvisioning } from '../provisioning/runner.js';
-import { ensureInboundSecret } from './inbound.js';
-import { makeWithSource } from '../sdk/source-scope.js';
-import { makeSendBulk } from '../sdk/send-bulk.js';
-import { makeCustomData } from '../sdk/custom-data-scope.js';
 
 export const ACCESS_TOKEN_KEY = '__access_token';
 /** State key where the provisioning result (sourceIds/defIds) is stored. */
@@ -214,7 +214,7 @@ async function onActivate<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>): P
 
   if (deps.integration.provisioning) {
     const plan = await deps.integration.provisioning(ctx);
-    const prov = await runProvisioning(ctx.spm, plan);
+    const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
     deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
     if (prov.errors.length > 0) {
       // Count ALL successful resources (sources, defs, events, statuses) — not
@@ -267,7 +267,7 @@ async function onConfigUpdated<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S
     const ctx = buildContext(id, deps);
     if (deps.integration.provisioning) {
       const plan = await deps.integration.provisioning(ctx);
-      const prov = await runProvisioning(ctx.spm, plan);
+      const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
       deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
     }
     if (deps.integration.hooks?.onConfigUpdated) await deps.integration.hooks.onConfigUpdated(ctx);

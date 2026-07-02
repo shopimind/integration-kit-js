@@ -1,8 +1,9 @@
 import { SpmOrdersStatuses, SpmHelpers, type SpmHttpClient } from '@shopimind/sdk-js';
 import type { ProvisioningPlan } from '../integration/types.js';
 import type { NewCustomDataDefinition } from '../contracts/index.js';
-import { validateProvisioningEvents } from '../integration/define-integration.js';
+import { validateProvisioningEvents, validateCustomDataDefinition } from '../integration/define-integration.js';
 import { ensureDataSource, ensureCustomDataDefinition, ensureEvent } from './ensure.js';
+import type { Logger } from '../logging/logger.js';
 
 /**
  * Runs a `ProvisioningPlan` (idempotent find-or-create). Best-effort per
@@ -18,7 +19,11 @@ export interface ProvisioningResult {
   errors: string[];
 }
 
-export async function runProvisioning(client: SpmHttpClient, plan: ProvisioningPlan): Promise<ProvisioningResult> {
+export async function runProvisioning(
+  client: SpmHttpClient,
+  plan: ProvisioningPlan,
+  logger?: Logger,
+): Promise<ProvisioningResult> {
   const result: ProvisioningResult = { sourceIds: {}, defIds: {}, events: 0, orderStatuses: 0, errors: [] };
 
   for (const ds of plan.dataSources ?? []) {
@@ -31,9 +36,22 @@ export async function runProvisioning(client: SpmHttpClient, plan: ProvisioningP
     }
   }
 
-  for (const def of plan.customData ?? []) {
+  // E10 — order the custom-data plan so every custom→custom target is CREATED BEFORE
+  // the definition that references it (its id must exist to resolve the relationship).
+  // A topological sort removes the "declare X before Y" foot-gun entirely; a genuine
+  // dependency CYCLE is a hard error (unresolvable). A relationship to an out-of-plan
+  // custom name is left as-is and warned about (see resolveCustomRelationTargets).
+  const orderedCustomData = topoSortCustomData(plan.customData ?? []);
+  for (const def of orderedCustomData) {
     try {
-      result.defIds[def.name] = await ensureCustomDataDefinition(client, resolveCustomRelationTargets(def, result.defIds));
+      // E10 — structural guards before the network call: unique_keys ⊆ fields and
+      // relationships.sourceField ∈ fields. A misconfig fails here with a precise
+      // message instead of an opaque API rejection.
+      validateCustomDataDefinition(def);
+      result.defIds[def.name] = await ensureCustomDataDefinition(
+        client,
+        resolveCustomRelationTargets(def, result.defIds, logger),
+      );
     } catch (e) {
       result.errors.push(`def ${def.name}: ${errMsg(e)}`);
     }
@@ -66,24 +84,76 @@ export async function runProvisioning(client: SpmHttpClient, plan: ProvisioningP
 /**
  * Resolves a custom relationship's `targetSchema` declared by NAME (a sibling
  * definition in the same plan) to the sibling's numeric id — mirroring how
- * dataSources resolve `parentKey` -> `parent_id`. The target must have been created
- * earlier in the run (declare it BEFORE the definition that references it); a
- * `targetSchema` that is already an id, or that names an out-of-plan definition, is
- * left untouched.
+ * dataSources resolve `parentKey` -> `parent_id`. Thanks to the topological sort
+ * (E10) the sibling is always created before this definition. A `targetSchema` that
+ * is already numeric is left untouched; a custom target that is NON-NUMERIC and NOT
+ * in the plan cannot be resolved to an id — it is left as-is and WARNED about (E10).
  */
 function resolveCustomRelationTargets(
   def: NewCustomDataDefinition,
   defIds: Record<string, number>,
+  logger?: Logger,
 ): NewCustomDataDefinition {
   if (!def.relationships?.length) return def;
   return {
     ...def,
-    relationships: def.relationships.map((r) =>
-      r.targetSchemaType === 'custom' && defIds[r.targetSchema] != null
-        ? { ...r, targetSchema: String(defIds[r.targetSchema]) }
-        : r,
-    ),
+    relationships: def.relationships.map((r) => {
+      if (r.targetSchemaType !== 'custom') return r;
+      if (defIds[r.targetSchema] != null) return { ...r, targetSchema: String(defIds[r.targetSchema]) };
+      // Not resolved by name. If it is not already a numeric id, it references an
+      // out-of-plan definition we cannot resolve here — surface it rather than
+      // silently shipping an unresolvable target to the API.
+      if (!/^\d+$/.test(String(r.targetSchema))) {
+        logger?.warn(
+          `custom data '${def.name}': relationship target '${r.targetSchema}' is not in this plan and not a numeric id — left unresolved`,
+          { definition: def.name, sourceField: r.sourceField, targetSchema: r.targetSchema },
+        );
+      }
+      return r;
+    }),
   };
+}
+
+/**
+ * Topologically sorts the custom-data plan so a definition is always emitted AFTER
+ * the sibling definitions it references via custom→custom relationships (E10). Only
+ * intra-plan custom targets create an edge; system targets and out-of-plan/numeric
+ * targets do not. Throws on a dependency cycle (unresolvable ordering). Definitions
+ * without in-plan dependencies keep their declaration order (stable).
+ */
+export function topoSortCustomData(defs: NewCustomDataDefinition[]): NewCustomDataDefinition[] {
+  if (defs.length <= 1) return defs;
+  const byName = new Map(defs.map((d) => [d.name, d]));
+  const deps = new Map<string, string[]>();
+  for (const d of defs) {
+    const targets = (d.relationships ?? [])
+      .filter((r) => r.targetSchemaType === 'custom' && byName.has(r.targetSchema) && r.targetSchema !== d.name)
+      .map((r) => r.targetSchema);
+    deps.set(d.name, [...new Set(targets)]);
+  }
+
+  const sorted: NewCustomDataDefinition[] = [];
+  const state = new Map<string, 'visiting' | 'done'>();
+  const stack: string[] = [];
+
+  const visit = (name: string): void => {
+    const s = state.get(name);
+    if (s === 'done') return;
+    if (s === 'visiting') {
+      throw new Error(`custom data: dependency cycle detected (${[...stack, name].join(' -> ')})`);
+    }
+    state.set(name, 'visiting');
+    stack.push(name);
+    for (const dep of deps.get(name) ?? []) visit(dep);
+    stack.pop();
+    state.set(name, 'done');
+    const def = byName.get(name);
+    if (def) sorted.push(def);
+  };
+
+  // Iterate in declaration order so independent definitions keep their relative order.
+  for (const d of defs) visit(d.name);
+  return sorted;
 }
 
 function errMsg(e: unknown): string {

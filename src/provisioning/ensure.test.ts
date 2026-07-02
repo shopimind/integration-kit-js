@@ -103,6 +103,87 @@ describe('ensureDataSource', () => {
     expect(id).toBe(5);
     expect(created).toBe(0);
   });
+
+  it('E16: matches by stableConfigKey even when the label changed, and updates the label', async () => {
+    let created = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let updated: { id: any; dto: any } | null = null;
+    const client = mockClient(({ method, url, body }) => {
+      if (method === 'get' && url === 'data-sources')
+        return read([{ id_data_source: 5, label: 'Old Store Name', type: 'api', config: JSON.stringify({ hiboutik_store_id: 42 }) }]);
+      if (method === 'post' && url === 'data-sources') { created += 1; return read({ id_data_source: 6 }); }
+      if (method === 'put' && /data-sources\/5$/.test(url)) { updated = { id: 5, dto: body }; return read({}); }
+      return read({});
+    });
+    const id = await ensureDataSource(client, {
+      label: 'New Store Name',
+      type: 'api',
+      config: JSON.stringify({ hiboutik_store_id: 42 }),
+      stableConfigKey: 'hiboutik_store_id',
+    });
+    expect(id).toBe(5); // matched by stable key, not label
+    expect(created).toBe(0); // no duplicate spawned
+    expect(updated?.dto?.label).toBe('New Store Name'); // label refreshed
+  });
+
+  it('E16: stableConfigKey match with the SAME label does not issue an update', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let patched = 0;
+    const client = mockClient(({ method, url }) => {
+      if (method === 'get' && url === 'data-sources')
+        return read([{ id_data_source: 5, label: 'Store', type: 'api', config: JSON.stringify({ hiboutik_store_id: 42 }) }]);
+      if (method === 'put') { patched += 1; return read({}); }
+      return read({});
+    });
+    const id = await ensureDataSource(client, {
+      label: 'Store',
+      type: 'api',
+      config: JSON.stringify({ hiboutik_store_id: 42 }),
+      stableConfigKey: 'hiboutik_store_id',
+    });
+    expect(id).toBe(5);
+    expect(patched).toBe(0);
+  });
+
+  it('E16: creates when no source matches the stable key (falls through to create)', async () => {
+    let created = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let createDto: any = null;
+    const client = mockClient(({ method, url, body }) => {
+      if (method === 'get' && url === 'data-sources')
+        return read([{ id_data_source: 5, label: 'Other', type: 'api', config: JSON.stringify({ hiboutik_store_id: 99 }) }]);
+      if (method === 'post' && url === 'data-sources') { created += 1; createDto = body; return read({ id_data_source: 7 }); }
+      return read({});
+    });
+    const id = await ensureDataSource(client, {
+      label: 'New Store',
+      type: 'api',
+      config: JSON.stringify({ hiboutik_store_id: 42 }),
+      stableConfigKey: 'hiboutik_store_id',
+    });
+    expect(id).toBe(7);
+    expect(created).toBe(1);
+    // stableConfigKey is authoring-only metadata: NOT forwarded to the API create DTO.
+    expect(createDto).not.toHaveProperty('stableConfigKey');
+  });
+
+  it('E16: without stableConfigKey, behaviour is unchanged (label-only match)', async () => {
+    let created = 0;
+    const client = mockClient(({ method, url }) => {
+      if (method === 'get' && url === 'data-sources')
+        return read([{ id_data_source: 5, label: 'Store', type: 'api', config: JSON.stringify({ hiboutik_store_id: 42 }) }]);
+      if (method === 'post' && url === 'data-sources') { created += 1; return read({ id_data_source: 8 }); }
+      return read({});
+    });
+    // Same config key but a NEW label and no stableConfigKey -> a new source is created.
+    const id = await ensureDataSource(client, {
+      label: 'Renamed',
+      type: 'api',
+      config: JSON.stringify({ hiboutik_store_id: 42 }),
+    });
+    expect(id).toBe(8);
+    expect(created).toBe(1);
+  });
 });
 
 describe('ensureEvent', () => {
