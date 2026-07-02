@@ -3,118 +3,214 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ShopiMind — Console d'intégration</title>
+    <title>ShopiMind — Console d'exploitation</title>
     <style nonce="__CSP_NONCE__">
       :root {
-        --bg: #0f1216;
-        --panel: #171b21;
-        --panel-2: #1e242c;
-        --line: #2a323c;
-        --text: #e6eaef;
-        --muted: #94a1b2;
-        --brand: #5b8cff;
-        --ok: #37b679;
-        --warn: #e0a52b;
-        --err: #e5544b;
-        --radius: 10px;
+        --bg: #0b0e13; --surface: #12161d; --surface-2: #171c25; --surface-3: #1d2430;
+        --border: #242c38; --border-2: #303a49; --text: #e7ecf3; --muted: #98a5b7; --faint: #6a7688;
+        --brand: #6b93ff; --brand-ink: #fff; --brand-bg: rgba(107,147,255,.14);
+        --ok: #34c88a; --ok-bg: rgba(52,200,138,.13);
+        --warn: #e6ab35; --warn-bg: rgba(230,171,53,.13);
+        --err: #f0625b; --err-bg: rgba(240,98,91,.13);
+        --r: 12px; --r-sm: 8px; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.22);
       }
       @media (prefers-color-scheme: light) {
         :root {
-          --bg: #f4f6f9;
-          --panel: #ffffff;
-          --panel-2: #f0f3f7;
-          --line: #dde3ea;
-          --text: #1a2029;
-          --muted: #5c6b7a;
+          --bg: #f6f8fb; --surface: #ffffff; --surface-2: #f3f6fa; --surface-3: #eef2f7;
+          --border: #e5e9f0; --border-2: #d6dde7; --text: #18202e; --muted: #5a6675; --faint: #8b95a4;
+          --brand: #3d6bff; --brand-bg: rgba(61,107,255,.10);
+          --ok: #17a06a; --ok-bg: rgba(23,160,106,.10);
+          --warn: #b9821a; --warn-bg: rgba(185,130,26,.12);
+          --err: #dc4b45; --err-bg: rgba(220,75,69,.10);
+          --shadow: 0 1px 2px rgba(16,24,40,.05), 0 10px 28px rgba(16,24,40,.06);
         }
       }
       * { box-sizing: border-box; }
       html, body { margin: 0; height: 100%; }
       body {
-        background: var(--bg);
-        color: var(--text);
-        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg); color: var(--text);
+        font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
       a { color: var(--brand); text-decoration: none; }
-      button {
-        font: inherit; cursor: pointer; border: 1px solid var(--line);
-        background: var(--panel-2); color: var(--text);
-        padding: 7px 12px; border-radius: 8px;
+      h1, h2, h3, p { margin: 0; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+      .muted { color: var(--muted); }
+      .small { font-size: 12.5px; }
+      svg { display: block; }
+
+      /* ---- Buttons ---- */
+      .btn {
+        display: inline-flex; align-items: center; gap: 7px; font: inherit; font-weight: 550; cursor: pointer;
+        border: 1px solid var(--border-2); background: var(--surface); color: var(--text);
+        padding: 8px 13px; border-radius: var(--r-sm); transition: background .12s, border-color .12s, opacity .12s;
+        white-space: nowrap; line-height: 1;
       }
-      button:hover { border-color: var(--brand); }
-      button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
-      button.ghost { background: transparent; }
-      button:disabled { opacity: .5; cursor: not-allowed; }
+      .btn svg { width: 15px; height: 15px; }
+      .btn:hover { background: var(--surface-3); border-color: var(--faint); }
+      .btn.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+      .btn.primary:hover { filter: brightness(1.06); }
+      .btn.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); }
+      .btn.danger:hover { background: var(--err-bg); }
+      .btn.subtle { background: transparent; border-color: transparent; color: var(--muted); padding: 6px 9px; }
+      .btn.subtle:hover { background: var(--surface-3); color: var(--text); }
+      .btn.sm { padding: 5px 9px; font-size: 12.5px; }
+      .btn:disabled { opacity: .55; cursor: not-allowed; }
+      .btn.iconbtn { padding: 8px; }
+      .link-btn { background: none; border: 0; color: var(--brand); cursor: pointer; font: inherit; padding: 0; }
+
       input, select {
-        font: inherit; color: var(--text); background: var(--panel);
-        border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+        font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-2);
+        border-radius: var(--r-sm); padding: 9px 11px; transition: border-color .12s, box-shadow .12s;
       }
-      code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+      input:focus, select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-bg); }
+      .search { position: relative; }
+      .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--faint); }
+      .search input { padding-left: 33px; min-width: 240px; }
 
-      /* Layout */
-      .app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
-      .side { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 14px; }
-      .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; margin-bottom: 22px; }
-      .brand .dot { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--brand), #9b6bff); }
-      .nav { display: flex; flex-direction: column; gap: 3px; }
-      .nav a { padding: 9px 11px; border-radius: 8px; color: var(--muted); font-weight: 500; }
-      .nav a.active, .nav a:hover { background: var(--panel-2); color: var(--text); }
-      .side .foot { position: sticky; top: 100vh; margin-top: 24px; color: var(--muted); font-size: 12px; }
-      .main { padding: 22px 26px; max-width: 1200px; }
-      .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
-      .head h1 { font-size: 20px; margin: 0; }
-      .sub { color: var(--muted); font-size: 13px; }
+      /* ---- Layout ---- */
+      .app { display: grid; grid-template-columns: 250px 1fr; min-height: 100vh; }
+      .side { background: var(--surface); border-right: 1px solid var(--border); padding: 18px 14px; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
+      .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; padding: 4px 8px 20px; }
+      .brand .logo { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--brand), #9b6bff); display: grid; place-items: center; box-shadow: 0 2px 8px var(--brand-bg); }
+      .brand .logo svg { width: 16px; height: 16px; color: #fff; }
+      .nav { display: flex; flex-direction: column; gap: 2px; }
+      .nav a { display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: var(--r-sm); color: var(--muted); font-weight: 550; position: relative; }
+      .nav a svg { width: 18px; height: 18px; }
+      .nav a:hover { background: var(--surface-2); color: var(--text); }
+      .nav a.active { background: var(--brand-bg); color: var(--brand); }
+      .side .foot { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+      .side .foot .ver { color: var(--faint); font-size: 12px; padding: 0 8px; }
+      .side .foot a { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; padding: 6px 8px; border-radius: var(--r-sm); }
+      .side .foot a:hover { background: var(--surface-2); color: var(--text); }
+      .side .foot a svg { width: 16px; height: 16px; }
 
-      /* Cards */
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
-      .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
-      .card .k { color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
-      .card .v { font-size: 26px; font-weight: 700; margin-top: 6px; }
-      .card .v small { font-size: 13px; font-weight: 500; color: var(--muted); }
+      .main { padding: 26px 30px 60px; max-width: 1280px; width: 100%; }
+      .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+      .head h1 { font-size: 21px; font-weight: 680; letter-spacing: -.01em; }
+      .head .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+      .head .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-      /* Table */
+      /* ---- Cards / stats ---- */
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+      .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow); }
+      .card.pad { padding: 18px; }
+      .stat { padding: 17px 18px; display: flex; flex-direction: column; gap: 2px; }
+      .stat .top { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+      .stat .top .ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--brand-bg); color: var(--brand); }
+      .stat .top .ic svg { width: 16px; height: 16px; }
+      .stat .top .lbl { display: flex; align-items: center; gap: 5px; }
+      .stat .v { font-size: 27px; font-weight: 720; letter-spacing: -.02em; margin-top: 8px; }
+      .stat .foot { color: var(--muted); font-size: 12.5px; }
+      .stat.warn .top .ic { background: var(--warn-bg); color: var(--warn); }
+      .stat.err .top .ic { background: var(--err-bg); color: var(--err); }
+
+      /* ---- Section ---- */
+      .section-title { display: flex; align-items: center; gap: 6px; font-weight: 620; font-size: 14px; margin: 22px 0 10px; }
+
+      /* ---- Table ---- */
+      .tablewrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); overflow: auto; box-shadow: var(--shadow); }
       table { width: 100%; border-collapse: collapse; }
-      .tablewrap { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; }
-      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-      th { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+      thead th { position: sticky; top: 0; background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+      thead th .th { display: inline-flex; align-items: center; gap: 5px; }
+      tbody td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
       tbody tr:last-child td { border-bottom: 0; }
       tbody tr.click { cursor: pointer; }
-      tbody tr.click:hover { background: var(--panel-2); }
+      tbody tr.click:hover { background: var(--surface-2); }
+      td.nowrap { white-space: nowrap; }
 
-      /* Bits */
-      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); }
-      .badge.active { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-      .badge.inactive { color: var(--muted); }
-      .badge.uninstalled { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent); }
-      .badge.ok { color: var(--ok); }
-      .badge.err { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent); }
+      /* ---- Badges / bars ---- */
+      .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-3); color: var(--muted); border: 1px solid transparent; white-space: nowrap; }
+      .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+      .badge.ok { color: var(--ok); background: var(--ok-bg); }
+      .badge.err { color: var(--err); background: var(--err-bg); }
+      .badge.warn { color: var(--warn); background: var(--warn-bg); }
+      .badge.brand { color: var(--brand); background: var(--brand-bg); }
+      .bar { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; min-width: 80px; }
+      .bar > i { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
+
+      .kv { display: grid; grid-template-columns: 220px 1fr; gap: 12px 16px; }
+      .kv .k { color: var(--muted); display: flex; align-items: center; gap: 5px; }
+      .kv .v { color: var(--text); }
       .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
       .spacer { flex: 1; }
-      .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 18px 0 14px; flex-wrap: wrap; }
-      .tabs button { border: 0; background: transparent; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; }
-      .tabs button.active { color: var(--text); border-bottom-color: var(--brand); }
-      .empty { color: var(--muted); padding: 26px; text-align: center; }
-      .kv { display: grid; grid-template-columns: 190px 1fr; gap: 6px 14px; }
-      .kv .k { color: var(--muted); }
-      .paginator { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; color: var(--muted); }
-      pre.payload { margin: 0; white-space: pre-wrap; word-break: break-word; max-width: 520px; color: var(--muted); }
 
-      /* Login */
-      .login { display: grid; place-items: center; min-height: 100vh; }
-      .login .box { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 30px; width: 360px; max-width: 92vw; }
-      .login h1 { font-size: 18px; margin: 12px 0 4px; }
-      .login p { color: var(--muted); margin: 0 0 18px; font-size: 13px; }
+      /* ---- Tabs ---- */
+      .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 20px 0 16px; flex-wrap: wrap; }
+      .tabs button { border: 0; background: none; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 13px; font: inherit; font-weight: 550; cursor: pointer; margin-bottom: -1px; }
+      .tabs button:hover { color: var(--text); }
+      .tabs button.active { color: var(--brand); border-bottom-color: var(--brand); }
+
+      /* ---- Payload ---- */
+      .payload-wrap { min-width: 240px; max-width: 440px; }
+      .idcell { white-space: nowrap; }
+      .payload-box { position: relative; }
+      pre.payload { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 12px; overflow: hidden; }
+      .payload-box.clamp pre.payload { max-height: 118px; }
+      .payload-box.clamp::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(transparent, var(--surface-2)); pointer-events: none; border-radius: 0 0 var(--r-sm) var(--r-sm); }
+      .payload-box.expanded pre.payload { max-height: 420px; overflow: auto; }
+      .payload-box.expanded::after { display: none; }
+      .payload-bar { display: flex; gap: 12px; align-items: center; margin-top: 7px; }
+
+      /* ---- Empty / skeleton ---- */
+      .empty { color: var(--muted); padding: 40px 20px; text-align: center; }
+      .empty .ic { width: 40px; height: 40px; margin: 0 auto 12px; color: var(--faint); }
+      .empty .ic svg { width: 40px; height: 40px; }
+      .skel { display: inline-block; height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2)); background-size: 200% 100%; animation: sh 1.2s infinite; }
+      @keyframes sh { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+      .spin { width: 15px; height: 15px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: rot .7s linear infinite; display: inline-block; }
+      @keyframes rot { to { transform: rotate(360deg); } }
+
+      /* ---- Paginator ---- */
+      .paginator { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 12px; color: var(--muted); font-size: 13px; }
+      .paginator .btn { padding: 6px 9px; }
+
+      /* ---- Tooltip trigger ---- */
+      .tip { display: inline-flex; align-items: center; color: var(--faint); cursor: help; }
+      .tip svg { width: 14px; height: 14px; }
+      .tip:hover, .tip:focus { color: var(--brand); outline: none; }
+      #tt { position: fixed; z-index: 100; max-width: 280px; background: #0d1117; color: #e7ecf3; border: 1px solid #2a2f3a; border-radius: 8px; padding: 8px 11px; font-size: 12.5px; line-height: 1.45; box-shadow: 0 8px 24px rgba(0,0,0,.35); pointer-events: none; opacity: 0; transform: translateY(3px); transition: opacity .12s, transform .12s; }
+      #tt.on { opacity: 1; transform: translateY(0); }
+
+      /* ---- Modal ---- */
+      .modal-overlay { position: fixed; inset: 0; background: rgba(4,7,12,.55); backdrop-filter: blur(2px); display: grid; place-items: center; z-index: 90; padding: 20px; }
+      .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow); width: 440px; max-width: 100%; overflow: hidden; }
+      .modal-head { display: flex; align-items: center; gap: 11px; padding: 18px 20px 4px; }
+      .modal-head .ic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--brand-bg); color: var(--brand); flex: none; }
+      .modal-head.danger .ic { background: var(--err-bg); color: var(--err); }
+      .modal-head .ic svg { width: 18px; height: 18px; }
+      .modal-head h3 { font-size: 16px; font-weight: 650; }
+      .modal-body { padding: 6px 20px 18px 65px; color: var(--text); }
+      .modal-body .d { color: var(--muted); font-size: 13px; margin-top: 8px; }
+      .modal-foot { display: flex; justify-content: flex-end; gap: 9px; padding: 14px 20px; background: var(--surface-2); border-top: 1px solid var(--border); }
+
+      /* ---- Toast ---- */
+      #toast { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 110; }
+      .toast { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--brand); padding: 12px 15px; border-radius: var(--r-sm); box-shadow: var(--shadow); max-width: 360px; animation: slidein .18s ease; }
+      .toast.ok { border-left-color: var(--ok); } .toast.ok svg { color: var(--ok); }
+      .toast.err { border-left-color: var(--err); } .toast.err svg { color: var(--err); }
+      .toast svg { width: 17px; height: 17px; color: var(--brand); flex: none; }
+      @keyframes slidein { from { opacity: 0; transform: translateX(16px); } }
+
+      /* ---- Login ---- */
+      .login { display: grid; place-items: center; min-height: 100vh; padding: 20px; }
+      .login .box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 34px; width: 380px; max-width: 100%; box-shadow: var(--shadow); }
+      .login h1 { font-size: 19px; margin: 14px 0 6px; }
+      .login p { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
       .login form { display: flex; flex-direction: column; gap: 12px; }
-      .err-note { color: var(--err); font-size: 13px; min-height: 18px; }
+      .login input { padding: 11px 13px; }
+      .err-note { color: var(--err); font-size: 13px; min-height: 18px; display: flex; align-items: center; gap: 6px; }
+      .err-note:empty { display: none; }
 
-      /* Toast */
-      #toast { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
-      .toast { background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--brand); padding: 10px 14px; border-radius: 8px; max-width: 340px; }
-      .toast.err { border-left-color: var(--err); }
-
-      @media (max-width: 760px) {
+      @media (max-width: 820px) {
         .app { grid-template-columns: 1fr; }
-        .side { display: none; }
+        .side { position: static; height: auto; flex-direction: row; align-items: center; overflow-x: auto; padding: 10px 12px; }
+        .side .brand { padding: 4px 10px 4px 4px; }
+        .nav { flex-direction: row; }
+        .nav a span { display: none; }
+        .side .foot { margin: 0 0 0 auto; border: 0; padding: 0; flex-direction: row; }
+        .side .foot .ver { display: none; }
+        .main { padding: 18px 16px 50px; }
       }
     </style>
   </head>
@@ -125,9 +221,38 @@
     <script nonce="__CSP_NONCE__">
       'use strict';
 
-      // ------------------------------------------------------------------ helpers
-      // DOM builder that ALWAYS inserts server data as text (never innerHTML), so a
-      // payload can never inject markup even though the API already masks PII.
+      // ================================================================= icons
+      // Static, code-controlled SVG strings only (never fed server data), parsed via
+      // a <template>. This is the ONLY place innerHTML is used, on constants.
+      const ICONS = {
+        grid: '<path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>',
+        plug: '<path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"/>',
+        alert: '<path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+        clipboard: '<path d="M9 4h6M9 4a2 2 0 0 0-2 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1a2 2 0 0 0-2-2M8 11h8M8 15h6"/>',
+        search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+        sync: '<path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M3 21v-5h5"/>',
+        backfill: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 8v4l3 2"/>',
+        cog: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 4.6 15H4a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 5.7 8.3l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 11 4.6V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-1.1 2.7H20a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>',
+        eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+        trash: '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>',
+        info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+        chevron: '<path d="m9 18 6-6-6-6"/>',
+        logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+        check: '<path d="M20 6 9 17l-5-5"/>',
+        x: '<path d="M18 6 6 18M6 6l12 12"/>',
+        spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/>',
+        box: '<path d="M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/>',
+        empty: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
+      };
+      function ico(name) {
+        const t = document.createElement('template');
+        t.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || '') + '</svg>';
+        return t.content.firstChild;
+      }
+
+      // ================================================================= dom helpers
+      // el() ALWAYS inserts server data as text (never innerHTML) -> markup can never
+      // be injected even though the API already masks PII.
       function el(tag, props, children) {
         const n = document.createElement(tag);
         if (props) {
@@ -144,60 +269,117 @@
         }
         return n;
       }
-      const $ = (sel, root) => (root || document).querySelector(sel);
+      const $ = (s, r) => (r || document).querySelector(s);
       const clear = (n) => { while (n.firstChild) n.removeChild(n.firstChild); return n; };
-      const fmtDate = (s) => (s ? String(s).replace('T', ' ').replace('Z', '') : '—');
+      function fmtDate(s) {
+        if (!s) return '—';
+        const t = String(s).replace('T', ' ').replace(/\.\d+/, '').replace('Z', '');
+        return t;
+      }
+      function pretty(j) { if (j == null || j === '') return '—'; try { return JSON.stringify(JSON.parse(j), null, 2); } catch (_) { return String(j); } }
+      function shortId(id) { const s = String(id || ''); return s.length > 18 ? s.slice(0, 8) + '…' + s.slice(-4) : (s || '—'); }
+      function idCell(id) { return el('span', { class: 'mono idcell', tabindex: '0', 'data-tip': id, text: shortId(id) }); }
 
-      function toast(msg, isErr) {
-        const t = el('div', { class: 'toast' + (isErr ? ' err' : ''), text: msg });
+      // ================================================================= tooltip
+      const ttEl = el('div', { id: 'tt' });
+      document.body.appendChild(ttEl);
+      function showTip(target) {
+        const text = target.getAttribute('data-tip'); if (!text) return;
+        ttEl.textContent = text; ttEl.classList.add('on');
+        const r = target.getBoundingClientRect();
+        ttEl.style.left = '0px'; ttEl.style.top = '0px';
+        const tw = ttEl.offsetWidth, th = ttEl.offsetHeight;
+        let left = r.left + r.width / 2 - tw / 2;
+        left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+        let top = r.top - th - 8;
+        if (top < 8) top = r.bottom + 8;
+        ttEl.style.left = left + 'px'; ttEl.style.top = top + 'px';
+      }
+      const hideTip = () => ttEl.classList.remove('on');
+      document.addEventListener('mouseover', (e) => { const t = e.target.closest('[data-tip]'); if (t) showTip(t); });
+      document.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tip]')) hideTip(); });
+      document.addEventListener('focusin', (e) => { const t = e.target.closest('[data-tip]'); if (t) showTip(t); });
+      document.addEventListener('focusout', hideTip);
+      window.addEventListener('scroll', hideTip, true);
+      /** A small ⓘ help icon carrying a tooltip. */
+      function tip(text) { const s = el('span', { class: 'tip', tabindex: '0', 'data-tip': text }); s.appendChild(ico('info')); return s; }
+      /** A header cell label with an optional help tooltip. */
+      function th(label, help) { return el('span', { class: 'th' }, [label, help ? tip(help) : null]); }
+
+      // ================================================================= toast
+      function toast(msg, kind) {
+        const t = el('div', { class: 'toast ' + (kind || 'ok') }, [ico(kind === 'err' ? 'alert' : 'check'), el('span', { text: msg })]);
         $('#toast').appendChild(t);
-        setTimeout(() => t.remove(), 4200);
+        setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 200); }, 4200);
       }
 
-      // ------------------------------------------------------------------ state + api
-      const state = { csrf: null, view: 'dashboard', instId: null, tab: 'overview' };
+      // ================================================================= modal / confirm
+      function confirmDialog(o) {
+        return new Promise((resolve) => {
+          const done = (v) => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(v); };
+          const onKey = (e) => { if (e.key === 'Escape') done(false); };
+          const confirmBtn = el('button', { class: 'btn ' + (o.danger ? 'danger' : 'primary'), onclick: () => done(true) }, [o.icon ? ico(o.icon) : null, el('span', { text: o.confirmLabel || 'Confirmer' })]);
+          const card = el('div', { class: 'modal' }, [
+            el('div', { class: 'modal-head ' + (o.danger ? 'danger' : '') }, [el('span', { class: 'ic' }, [ico(o.danger ? 'alert' : 'info')]), el('h3', { text: o.title })]),
+            el('div', { class: 'modal-body' }, [el('div', { text: o.message }), o.detail ? el('div', { class: 'd', text: o.detail }) : null]),
+            el('div', { class: 'modal-foot' }, [el('button', { class: 'btn', text: 'Annuler', onclick: () => done(false) }), confirmBtn]),
+          ]);
+          const overlay = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) done(false); } }, [card]);
+          document.body.appendChild(overlay);
+          document.addEventListener('keydown', onKey);
+          confirmBtn.focus();
+        });
+      }
 
+      // ================================================================= state + api
+      const state = { csrf: null, view: 'dashboard', instId: null, tab: 'overview' };
       async function api(path, opts) {
         opts = opts || {};
         const headers = Object.assign({}, opts.headers);
         if (opts.body != null) headers['content-type'] = 'application/json';
         if (state.csrf && opts.method && opts.method !== 'GET') headers['x-csrf-token'] = state.csrf;
-        const res = await fetch(path, {
-          method: opts.method || 'GET',
-          credentials: 'same-origin',
-          headers,
-          body: opts.body != null ? JSON.stringify(opts.body) : undefined,
-        });
+        const res = await fetch(path, { method: opts.method || 'GET', credentials: 'same-origin', headers, body: opts.body != null ? JSON.stringify(opts.body) : undefined });
         if (res.status === 401) { state.csrf = null; renderLogin('Session expirée, reconnectez-vous.'); throw new Error('unauthorized'); }
         const text = await res.text();
         const json = text ? JSON.parse(text) : {};
         if (!res.ok) throw new Error((json && json.error) || ('HTTP ' + res.status));
         return json;
       }
+      async function post(path, body) { return api(path, { method: 'POST', body: body || {} }); }
 
-      // ------------------------------------------------------------------ login
+      // A button that runs an async action, with optional confirm dialog + inline spinner.
+      function actionBtn(o) {
+        const label = el('span', { text: o.label });
+        const btn = el('button', { class: 'btn ' + (o.variant || '') }, [o.icon ? ico(o.icon) : null, label]);
+        btn.addEventListener('click', async () => {
+          if (o.confirm) { const ok = await confirmDialog(o.confirm); if (!ok) return; }
+          const kids = Array.from(btn.childNodes);
+          btn.disabled = true; clear(btn); btn.appendChild(el('span', { class: 'spin' })); btn.appendChild(el('span', { text: '  ' + o.label }));
+          try { await o.run(); if (o.toast) toast(o.toast); if (o.after) o.after(); }
+          catch (e) { if (e.message !== 'unauthorized') toast(e.message, 'err'); }
+          finally { btn.disabled = false; clear(btn); kids.forEach((k) => btn.appendChild(k)); }
+        });
+        return btn;
+      }
+
+      // ================================================================= login
       function renderLogin(note) {
         const root = clear($('#root'));
-        const err = el('div', { class: 'err-note', text: note || '' });
+        const err = el('div', { class: 'err-note' }, note ? [ico('alert'), el('span', { text: note })] : []);
         const input = el('input', { type: 'password', placeholder: 'Jeton administrateur', autocomplete: 'current-password' });
-        const btn = el('button', { class: 'primary', type: 'submit', text: 'Se connecter' });
+        const btn = el('button', { class: 'btn primary', type: 'submit', text: 'Se connecter', style: 'justify-content:center' });
         const form = el('form', {
           onsubmit: async (e) => {
-            e.preventDefault();
-            btn.disabled = true; err.textContent = '';
-            try {
-              const r = await api('/admin/session', { method: 'POST', body: { token: input.value } });
-              state.csrf = r.csrf; input.value = '';
-              go('dashboard');
-            } catch (_) {
-              err.textContent = 'Jeton invalide.';
-            } finally { btn.disabled = false; }
+            e.preventDefault(); btn.disabled = true; clear(err);
+            try { const r = await api('/admin/session', { method: 'POST', body: { token: input.value } }); state.csrf = r.csrf; input.value = ''; go('dashboard'); }
+            catch (_) { clear(err); err.appendChild(ico('alert')); err.appendChild(el('span', { text: 'Jeton invalide.' })); }
+            finally { btn.disabled = false; }
           },
         }, [input, btn, err]);
         root.appendChild(el('div', { class: 'login' }, [
           el('div', { class: 'box' }, [
-            el('div', { class: 'brand' }, [el('span', { class: 'dot' }), el('span', { text: 'ShopiMind' })]),
-            el('h1', { text: 'Console d’intégration' }),
+            el('div', { class: 'brand', style: 'padding:0' }, [el('span', { class: 'logo' }, [ico('spark')]), el('span', { text: 'ShopiMind' })]),
+            el('h1', { text: 'Console d’exploitation' }),
             el('p', { text: 'Espace d’exploitation local de cette intégration. Aucune donnée ne quitte votre infrastructure.' }),
             form,
           ]),
@@ -205,287 +387,304 @@
         input.focus();
       }
 
-      // ------------------------------------------------------------------ shell
+      // ================================================================= shell
       const NAV = [
-        { id: 'dashboard', label: 'Tableau de bord' },
-        { id: 'installations', label: 'Installations' },
-        { id: 'rejected', label: 'Rejets' },
-        { id: 'audit', label: 'Journal d’audit' },
+        { id: 'dashboard', label: 'Tableau de bord', icon: 'grid' },
+        { id: 'installations', label: 'Installations', icon: 'plug' },
+        { id: 'rejected', label: 'Rejets', icon: 'alert' },
+        { id: 'audit', label: 'Journal d’audit', icon: 'clipboard' },
       ];
-
-      function shell(title, sub, body) {
+      function shell(title, sub, body, actions) {
         const root = clear($('#root'));
         const nav = el('nav', { class: 'nav' }, NAV.map((it) =>
-          el('a', {
-            href: '#' + it.id, class: state.view === it.id ? 'active' : '', text: it.label,
-            onclick: (e) => { e.preventDefault(); go(it.id); },
-          })));
+          el('a', { href: '#' + it.id, class: state.view === it.id ? 'active' : '', onclick: (e) => { e.preventDefault(); go(it.id); } }, [ico(it.icon), el('span', { text: it.label })])));
         const side = el('aside', { class: 'side' }, [
-          el('div', { class: 'brand' }, [el('span', { class: 'dot' }), el('span', { text: 'ShopiMind' })]),
+          el('div', { class: 'brand' }, [el('span', { class: 'logo' }, [ico('spark')]), el('span', { text: 'ShopiMind' })]),
           nav,
           el('div', { class: 'foot' }, [
-            el('div', { id: 'kitver', text: '' }),
-            el('a', { href: '#', text: 'Se déconnecter', onclick: async (e) => { e.preventDefault(); try { await api('/admin/session', { method: 'DELETE' }); } catch (_) {} state.csrf = null; renderLogin('Déconnecté.'); } }),
+            el('div', { class: 'ver', id: 'kitver', text: '' }),
+            el('a', { href: '#', onclick: async (e) => { e.preventDefault(); if (!(await confirmDialog({ title: 'Se déconnecter ?', message: 'Votre session sera fermée sur cet appareil.', confirmLabel: 'Se déconnecter' }))) return; try { await api('/admin/session', { method: 'DELETE' }); } catch (_) {} state.csrf = null; renderLogin('Déconnecté.'); } }, [ico('logout'), el('span', { text: 'Se déconnecter' })]),
           ]),
         ]);
         const main = el('main', { class: 'main' }, [
           el('div', { class: 'head' }, [
             el('div', {}, [el('h1', { text: title }), sub ? el('div', { class: 'sub', text: sub }) : null]),
+            actions ? el('div', { class: 'actions' }, actions) : null,
           ]),
           body,
         ]);
         root.appendChild(el('div', { class: 'app' }, [side, main]));
+        const kv = $('#kitver'); if (kv && state.kitVersion) kv.textContent = 'kit v' + state.kitVersion;
       }
+
+      // ================================================================= building blocks
+      function badge(text, kind, withDot) { return el('span', { class: 'badge ' + (kind || '') }, [withDot ? el('span', { class: 'dot' }) : null, el('span', { text: text || '—' })]); }
+      function statusBadge(s) { const k = s === 'active' ? 'ok' : s === 'uninstalled' ? 'err' : ''; return badge(s || '—', k, true); }
+      function runBadge(s) { const k = s === 'ok' ? 'ok' : s === 'partial' ? 'warn' : s === 'failed' ? 'err' : ''; return badge(s || '—', k); }
+      function summarize(j) { try { const s = JSON.parse(j); return [s.mode, s.status].filter(Boolean).join(' · ') + (s.errors && s.errors.length ? ' · ' + s.errors.length + ' err' : ''); } catch (_) { return '—'; } }
+
+      function table(cols, rows, opts) {
+        opts = opts || {};
+        const head = el('thead', {}, el('tr', {}, cols.map((c) => el('th', {}, [typeof c === 'object' ? c : el('span', { text: c })]))));
+        let bodyRows;
+        if (opts.loading) bodyRows = Array.from({ length: opts.loading }, () => el('tr', {}, cols.map(() => el('td', {}, [el('span', { class: 'skel', style: 'width:' + (40 + Math.floor(Math.random() * 45)) + '%' })]))));
+        else if (!rows.length) bodyRows = [el('tr', {}, el('td', { colspan: String(cols.length) }, [el('div', { class: 'empty' }, [el('div', { class: 'ic' }, [ico('empty')]), el('div', { text: opts.emptyText || 'Aucun élément.' })])]))];
+        else bodyRows = rows.map((r, i) => el('tr', opts.onRow ? { class: 'click', onclick: () => opts.onRow(i) } : {}, r.map((cell) => (typeof cell === 'object' && cell !== null ? el('td', {}, [cell]) : el('td', { class: 'nowrap', text: cell == null ? '—' : String(cell) })))));
+        return el('table', {}, [head, el('tbody', {}, bodyRows)]);
+      }
+      function tableCard(cols, rows, opts) { return el('div', { class: 'tablewrap' }, [table(cols, rows, opts)]); }
 
       function paginator(page, total, onGo) {
         const pages = Math.max(1, Math.ceil(total / page.limit));
         const cur = Math.floor(page.offset / page.limit) + 1;
+        if (total <= page.limit) return null;
         return el('div', { class: 'paginator' }, [
           el('span', { text: total + ' élément' + (total > 1 ? 's' : '') }),
-          el('button', { class: 'ghost', text: '‹', disabled: page.offset <= 0 ? '' : null, onclick: () => onGo(Math.max(0, page.offset - page.limit)) }),
-          el('span', { text: cur + ' / ' + pages }),
-          el('button', { class: 'ghost', text: '›', disabled: cur >= pages ? '' : null, onclick: () => onGo(page.offset + page.limit) }),
+          prevBtn(page, onGo), el('span', { text: cur + ' / ' + pages }), nextBtn(page, cur, pages, onGo),
         ]);
       }
+      function prevBtn(page, onGo) { const b = el('button', { class: 'btn sm', disabled: page.offset <= 0 ? '' : null, onclick: () => onGo(Math.max(0, page.offset - page.limit)), title: 'Précédent' }); const s = ico('chevron'); s.style.transform = 'rotate(180deg)'; b.appendChild(s); return b; }
+      function nextBtn(page, cur, pages, onGo) { const b = el('button', { class: 'btn sm', disabled: cur >= pages ? '' : null, onclick: () => onGo(page.offset + page.limit), title: 'Suivant' }); b.appendChild(ico('chevron')); return b; }
 
-      // ------------------------------------------------------------------ dashboard
+      // Masked payload cell: pretty-printed, clamped when long, with expand + audited reveal.
+      function payloadCell(revealPath, masked) {
+        const txt = pretty(masked);
+        const long = txt.split('\n').length > 6 || txt.length > 320;
+        const pre = el('pre', { class: 'payload', text: txt });
+        const box = el('div', { class: 'payload-box' + (long ? ' clamp' : '') }, [pre]);
+        const bar = el('div', { class: 'payload-bar' });
+        if (long) {
+          let open = false;
+          const t = el('button', { class: 'link-btn', text: 'Développer' });
+          t.addEventListener('click', () => { open = !open; box.classList.toggle('clamp', !open); box.classList.toggle('expanded', open); t.textContent = open ? 'Réduire' : 'Développer'; });
+          bar.appendChild(t);
+        }
+        if (revealPath) {
+          const reveal = actionBtn({
+            label: 'Révéler', icon: 'eye', variant: 'subtle',
+            confirm: { title: 'Afficher la charge en clair ?', message: 'La charge utile sera affichée non masquée.', detail: 'Cet accès est journalisé dans le journal d’audit.', confirmLabel: 'Révéler', icon: 'eye' },
+            run: async () => { const r = await post(revealPath); pre.textContent = pretty(r.payload_json); box.classList.remove('clamp'); reveal.replaceWith(el('span', { class: 'muted small' }, [ico('check'), el('span', { text: ' Révélé (audité)' })])); },
+          });
+          bar.appendChild(reveal);
+        }
+        return el('div', { class: 'payload-wrap' }, [box, bar.childNodes.length ? bar : null]);
+      }
+
+      // ================================================================= dashboard
+      const TIPS = {
+        installations: 'Boutiques ayant installé cette intégration, réparties par statut (active / inactive / désinstallée).',
+        webhooks: 'Événements de cycle de vie reçus de ShopiMind sur les dernières 24 h, et combien ont été refusés (signature invalide).',
+        rejected: 'Éléments refusés par l’API ShopiMind lors d’un push en masse (validation). Ils sont conservés (dead-letter) pour inspection puis rejeu.',
+        cursor: 'Position de synchronisation par entité et source : jusqu’où les données ont été poussées. Le curseur n’avance que si le run se termine sans erreur.',
+        failures: 'Nombre d’échecs consécutifs de ce curseur. Déclenche un backoff exponentiel ; remis à zéro à la première réussite.',
+        signatures: 'Signatures de webhooks conservées sur 7 jours pour la protection anti-rejeu (idempotence).',
+        rejectsCount: 'Nombre d’éléments actuellement en dead-letter pour cette installation.',
+        externalAccount: 'Compte interne de VOTRE application relié à cette installation (le pont de corrélation).',
+        installId: 'Jeton d’installation opaque émis par ShopiMind. À ne jamais interpréter.',
+        encrypted: 'Les secrets (clés API) sont chiffrés au repos et JAMAIS renvoyés. Seules les métadonnées (longueur, date) sont visibles.',
+        signatureOk: 'Résultat de la vérification de la signature HMAC du webhook à la réception.',
+      };
+      const ACT = {
+        sync: 'Lance une synchronisation incrémentale : ne récupère que les données modifiées depuis le dernier curseur. Sûr et rapide.',
+        backfill: 'Relance une synchronisation COMPLÈTE (backfill) depuis le début de l’historique. Peut être long et coûteux en appels API.',
+        reprovision: 'Ré-exécute le provisioning : recrée / met à jour les sources de données, custom data et événements côté ShopiMind (idempotent).',
+      };
+
       async function renderDashboard() {
-        shell('Tableau de bord', 'Vue d’ensemble de l’intégration', el('div', { text: 'Chargement…', class: 'sub' }));
+        shell('Tableau de bord', 'Vue d’ensemble de l’intégration', el('div', { class: 'grid' }, [1, 2, 3].map(() => el('div', { class: 'card stat' }, [el('span', { class: 'skel', style: 'width:50%' }), el('span', { class: 'skel', style: 'width:30%;height:24px;margin-top:10px' })]))));
         const m = await api('/admin/meta');
-        const setVer = $('#kitver'); if (setVer) setVer.textContent = 'kit v' + (m.kitVersion || '?');
+        state.kitVersion = m.kitVersion;
         const byStatus = m.installations.byStatus || {};
+        const statusStr = Object.keys(byStatus).map((k) => k + ': ' + byStatus[k]).join(' · ') || 'aucune';
         const cards = el('div', { class: 'grid' }, [
-          card('Installations', m.installations.total, Object.keys(byStatus).map((k) => k + ': ' + byStatus[k]).join('  ·  ')),
-          card('Webhooks (24 h)', m.webhooks24h.total, m.webhooks24h.refused + ' refusé(s)'),
-          card('Rejets (dead-letter)', m.rejected.total, (m.rejected.byEntity[0] ? 'top: ' + m.rejected.byEntity[0].entity : 'aucun')),
+          statCard('grid', 'Installations', m.installations.total, statusStr, TIPS.installations),
+          statCard('sync', 'Webhooks (24 h)', m.webhooks24h.total, m.webhooks24h.refused + ' refusé' + (m.webhooks24h.refused > 1 ? 's' : ''), TIPS.webhooks, m.webhooks24h.refused > 0 ? 'warn' : ''),
+          statCard('alert', 'Rejets (dead-letter)', m.rejected.total, m.rejected.byEntity[0] ? 'top : ' + m.rejected.byEntity[0].entity : 'aucun', TIPS.rejected, m.rejected.total > 0 ? 'err' : ''),
         ]);
-        const byEntity = (m.rejected.byEntity || []);
-        const detail = byEntity.length
-          ? el('div', { class: 'tablewrap', style: 'margin-top:16px' }, [table(['Entité', 'Rejets'], byEntity.map((r) => [r.entity || '—', String(r.n)]))])
-          : null;
-        shell('Tableau de bord', 'Généré ' + fmtDate(m.generatedAt) + ' · kit v' + (m.kitVersion || '?'),
-          el('div', {}, [cards, detail]));
+        const byEntity = m.rejected.byEntity || [];
+        const max = byEntity.reduce((a, r) => Math.max(a, r.n), 0) || 1;
+        const detail = byEntity.length ? el('div', {}, [
+          el('div', { class: 'section-title' }, ['Rejets par entité', tip(TIPS.rejected)]),
+          tableCard([th('Entité'), th('Rejets'), ''], byEntity.map((r) => [
+            r.entity || '—', String(r.n),
+            el('div', { class: 'bar', style: 'max-width:260px' }, [el('i', { style: 'width:' + Math.round((r.n / max) * 100) + '%' })]),
+          ])),
+        ]) : null;
+        shell('Tableau de bord', 'Généré ' + fmtDate(m.generatedAt) + ' · kit v' + (m.kitVersion || '?'), el('div', {}, [cards, detail]));
       }
-      function card(k, v, sub) {
-        return el('div', { class: 'card' }, [
-          el('div', { class: 'k', text: k }),
-          el('div', { class: 'v' }, [String(v), sub ? el('small', { text: '  ' + sub }) : null]),
+      function statCard(icon, label, value, foot, help, kind) {
+        return el('div', { class: 'card stat ' + (kind || '') }, [
+          el('div', { class: 'top' }, [el('span', { class: 'ic' }, [ico(icon)]), el('span', { class: 'lbl' }, [el('span', { text: label }), help ? tip(help) : null])]),
+          el('div', { class: 'v', text: String(value) }),
+          el('div', { class: 'foot', text: foot }),
         ]);
       }
-      function table(cols, rows, rowClick) {
-        const thead = el('thead', {}, el('tr', {}, cols.map((c) => el('th', { text: c }))));
-        const tbody = el('tbody', {}, rows.length
-          ? rows.map((r, i) => el('tr', rowClick ? { class: 'click', onclick: () => rowClick(i) } : {},
-              r.map((cell) => (typeof cell === 'object' && cell !== null ? el('td', {}, [cell]) : el('td', { text: cell == null ? '—' : String(cell) })))))
-          : [el('tr', {}, el('td', { class: 'empty', colspan: String(cols.length), text: 'Aucun élément.' }))]);
-        return el('table', {}, [thead, tbody]);
-      }
-      function statusBadge(s) { return el('span', { class: 'badge ' + (s || 'inactive'), text: s || '—' }); }
 
-      // ------------------------------------------------------------------ installations
+      // ================================================================= installations
       const instPage = { limit: 25, offset: 0, q: '', status: '' };
+      function filterBar(inputEl, extra, onApply) {
+        const search = el('div', { class: 'search' }, [ico('search'), inputEl]);
+        inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') onApply(); });
+        return el('div', { class: 'row', style: 'margin-bottom:16px' }, [search].concat(extra || []).concat([el('button', { class: 'btn', text: 'Filtrer', onclick: onApply })]));
+      }
       async function renderInstallations() {
         const q = el('input', { placeholder: 'Rechercher (id, domaine, nom)…', value: instPage.q });
-        const sel = el('select', {}, [['', 'Tous les statuts'], ['active', 'active'], ['inactive', 'inactive'], ['uninstalled', 'uninstalled']].map(
-          (o) => el('option', { value: o[0], text: o[1], selected: instPage.status === o[0] ? '' : null })));
+        const sel = el('select', {}, [['', 'Tous les statuts'], ['active', 'active'], ['inactive', 'inactive'], ['uninstalled', 'uninstalled']].map((o) => el('option', { value: o[0], text: o[1], selected: instPage.status === o[0] ? '' : null })));
         const apply = () => { instPage.q = q.value.trim(); instPage.status = sel.value; instPage.offset = 0; renderInstallations(); };
-        q.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
         sel.addEventListener('change', apply);
-        const bar = el('div', { class: 'row', style: 'margin-bottom:14px' }, [q, sel, el('button', { text: 'Filtrer', onclick: apply })]);
-
-        shell('Installations', null, el('div', {}, [bar, el('div', { class: 'sub', text: 'Chargement…' })]));
+        const bar = filterBar(q, [sel], apply);
+        const cols = [th('ID installation', TIPS.installId), th('Boutique'), th('Domaine'), th('Compte intégrateur', TIPS.externalAccount), th('Statut'), th('Mise à jour')];
+        shell('Installations', null, el('div', {}, [bar, tableCard(cols, [], { loading: 5 })]));
         const params = new URLSearchParams({ limit: String(instPage.limit), offset: String(instPage.offset) });
         if (instPage.q) params.set('q', instPage.q);
         if (instPage.status) params.set('status', instPage.status);
         const res = await api('/admin/installations?' + params.toString());
         const rows = res.items.map((it) => [
-          el('span', { class: 'mono', text: it.installation_id }),
-          it.shop_name || '—',
-          it.shop_domain || '—',
-          it.external_account_name || it.external_account_ref || '—',
-          statusBadge(it.status),
-          fmtDate(it.updated_at),
+          el('span', { class: 'mono', text: it.installation_id }), it.shop_name || '—', it.shop_domain || '—',
+          it.external_account_name || it.external_account_ref || '—', statusBadge(it.status), fmtDate(it.updated_at),
         ]);
-        const tbl = el('div', { class: 'tablewrap' }, [
-          table(['ID installation', 'Boutique', 'Domaine', 'Compte intégrateur', 'Statut', 'Mise à jour'], rows,
-            (i) => go('installation', res.items[i].installation_id)),
-        ]);
-        shell('Installations', res.total + ' installation(s)', el('div', {}, [
-          bar, tbl, paginator(instPage, res.total, (off) => { instPage.offset = off; renderInstallations(); }),
+        shell('Installations', res.total + ' installation' + (res.total > 1 ? 's' : ''), el('div', {}, [
+          bar, tableCard(cols, rows, { onRow: (i) => go('installation', res.items[i].installation_id), emptyText: 'Aucune installation.' }),
+          paginator(instPage, res.total, (off) => { instPage.offset = off; renderInstallations(); }),
         ]));
       }
 
-      // ------------------------------------------------------------------ installation detail
+      // ================================================================= installation detail
       const TABS = [
-        { id: 'overview', label: 'Aperçu' },
-        { id: 'runs', label: 'Synchros' },
-        { id: 'webhooks', label: 'Webhooks' },
-        { id: 'inbound', label: 'Entrants' },
-        { id: 'state', label: 'État' },
-        { id: 'rejected', label: 'Rejets' },
+        { id: 'overview', label: 'Aperçu' }, { id: 'runs', label: 'Synchros' }, { id: 'webhooks', label: 'Webhooks' },
+        { id: 'inbound', label: 'Entrants' }, { id: 'state', label: 'État' }, { id: 'rejected', label: 'Rejets' },
       ];
+      const enc = encodeURIComponent;
       async function renderInstallation(id) {
-        const d = await api('/admin/installations/' + encodeURIComponent(id));
+        const d = await api('/admin/installations/' + enc(id));
         const inst = d.install;
-        const back = el('button', { class: 'ghost', text: '‹ Installations', onclick: () => go('installations') });
-        const header = el('div', { class: 'card', style: 'margin-bottom:6px' }, [
-          el('div', { class: 'row' }, [el('span', { class: 'mono', text: inst.installation_id }), statusBadge(inst.status), el('span', { class: 'spacer' })]),
-          el('div', { class: 'kv', style: 'margin-top:12px' }, [
-            el('div', { class: 'k', text: 'Boutique' }), el('div', { text: (inst.shop_name || '—') + (inst.shop_domain ? ' · ' + inst.shop_domain : '') }),
-            el('div', { class: 'k', text: 'Compte intégrateur' }), el('div', { text: inst.external_account_name || inst.external_account_ref || '—' }),
-            el('div', { class: 'k', text: 'Installée / activée' }), el('div', { text: fmtDate(inst.installed_at) + ' / ' + fmtDate(inst.activated_at) }),
-            el('div', { class: 'k', text: 'Rejets / signatures (7 j)' }), el('div', { text: d.rejectedCount + ' / ' + d.seenSignatures7d }),
+        const back = el('button', { class: 'btn subtle', onclick: () => go('installations') }, [(function () { const s = ico('chevron'); s.style.transform = 'rotate(180deg)'; return s; })(), el('span', { text: 'Installations' })]);
+        const header = el('div', { class: 'card pad', style: 'margin-bottom:14px' }, [
+          el('div', { class: 'row' }, [el('span', { class: 'mono', style: 'font-size:13px', text: inst.installation_id }), statusBadge(inst.status)]),
+          el('div', { class: 'kv', style: 'margin-top:16px' }, [
+            el('div', { class: 'k' }, ['Boutique']), el('div', { class: 'v', text: (inst.shop_name || '—') + (inst.shop_domain ? ' · ' + inst.shop_domain : '') }),
+            el('div', { class: 'k' }, ['Compte intégrateur', tip(TIPS.externalAccount)]), el('div', { class: 'v', text: inst.external_account_name || inst.external_account_ref || '—' }),
+            el('div', { class: 'k' }, ['Installée / activée']), el('div', { class: 'v', text: fmtDate(inst.installed_at) + '  /  ' + fmtDate(inst.activated_at) }),
+            el('div', { class: 'k' }, ['Rejets / signatures (7 j)', tip(TIPS.rejectsCount + ' — ' + TIPS.signatures)]), el('div', { class: 'v', text: d.rejectedCount + ' / ' + d.seenSignatures7d }),
           ]),
         ]);
-        const tabsBar = el('div', { class: 'tabs' }, TABS.map((t) =>
-          el('button', { class: state.tab === t.id ? 'active' : '', text: t.label, onclick: () => { state.tab = t.id; renderInstallation(id); } })));
-        const panel = el('div', { class: 'sub', text: 'Chargement…' });
-        const actions = el('div', { class: 'row', style: 'margin:12px 0' }, [
-          el('button', { class: 'primary', text: 'Synchroniser', onclick: () => doAction('/admin/sync/' + enc(id), 'Synchro incrémentale lancée', () => renderInstallation(id)) }),
-          el('button', { text: 'Backfill complet', onclick: () => doAction('/admin/sync/' + enc(id) + '?full=true', 'Backfill complet lancé', () => renderInstallation(id)) }),
-          el('button', { text: 'Reprovisionner', onclick: () => doAction('/admin/installations/' + enc(id) + '/reprovision', 'Provisioning relancé', () => renderInstallation(id)) }),
+        const rerender = () => renderInstallation(id);
+        const actions = el('div', { class: 'row', style: 'margin:0 0 4px' }, [
+          actionBtn({ label: 'Synchroniser', icon: 'sync', variant: 'primary', toast: 'Synchronisation incrémentale lancée.', run: () => post('/admin/sync/' + enc(id)), after: rerender }),
+          actionBtn({ label: 'Backfill complet', icon: 'backfill', confirm: { title: 'Lancer un backfill complet ?', message: ACT.backfill, detail: 'À réserver à une re-synchronisation initiale ou une reprise après incident.', confirmLabel: 'Lancer le backfill', icon: 'backfill' }, toast: 'Backfill complet lancé.', run: () => post('/admin/sync/' + enc(id) + '?full=true'), after: rerender }),
+          actionBtn({ label: 'Reprovisionner', icon: 'cog', confirm: { title: 'Reprovisionner ?', message: ACT.reprovision, confirmLabel: 'Reprovisionner', icon: 'cog' }, toast: 'Provisioning relancé.', run: () => post('/admin/installations/' + enc(id) + '/reprovision'), after: rerender }),
+          el('span', { class: 'tip', tabindex: '0', 'data-tip': ACT.sync + '\n\n' + ACT.backfill }, [ico('info')]),
         ]);
-
-        shell('Installation', inst.shop_name || inst.installation_id, el('div', {}, [back, header, actions, tabsBar, panel]));
-        renderInstallTab(id, d, panel);
+        const tabsBar = el('div', { class: 'tabs' }, TABS.map((t) => el('button', { class: state.tab === t.id ? 'active' : '', text: t.label, onclick: () => { state.tab = t.id; renderInstallation(id); } })));
+        const panel = el('div', {}, [tableCard(['', '', ''], [], { loading: 3 })]);
+        shell('Installation', inst.shop_name || inst.installation_id, el('div', {}, [header, actions, tabsBar, panel]), [back]);
+        renderTab(id, d, panel);
       }
 
-      async function renderInstallTab(id, d, panel) {
+      async function renderTab(id, d, panel) {
         try {
           if (state.tab === 'overview') return fillOverview(d, panel);
           if (state.tab === 'runs') return fillPaged('/admin/installations/' + enc(id) + '/runs', panel,
-            ['Run', 'Statut', 'Démarré', 'Terminé', 'Résumé'], (r) => [r.id, badge(r.status), fmtDate(r.started_at), fmtDate(r.finished_at), summarize(r.summary_json)]);
+            [th('Run'), th('Statut'), th('Démarré'), th('Terminé'), th('Résumé')],
+            (r) => [r.id, runBadge(r.status), fmtDate(r.started_at), fmtDate(r.finished_at), summarize(r.summary_json)]);
           if (state.tab === 'webhooks') return fillPaged('/admin/installations/' + enc(id) + '/webhooks', panel,
-            ['Événement', 'Signature', 'Reçu', 'Charge utile (masquée)'], (r) => [r.event, r.signature_ok ? badge('ok', 'ok') : badge('refusée', 'err'), fmtDate(r.created_at), revealCell('/admin/installations/' + enc(id) + '/webhook-log/' + r.id + '/reveal', r.payload_json)]);
+            [th('Événement'), th('Signature', TIPS.signatureOk), th('Reçu'), th('Charge utile (masquée)')],
+            (r) => [r.event, r.signature_ok ? badge('ok', 'ok') : badge('refusée', 'err'), fmtDate(r.created_at), payloadCell('/admin/installations/' + enc(id) + '/webhook-log/' + r.id + '/reveal', r.payload_json)]);
           if (state.tab === 'inbound') return fillPaged('/admin/installations/' + enc(id) + '/inbound', panel,
-            ['Action', 'Statut', 'Reçu', 'Traité', 'Erreur'], (r) => [r.action, badge(r.status), fmtDate(r.received_at), fmtDate(r.processed_at), r.error]);
+            [th('Action'), th('Statut'), th('Reçu'), th('Traité'), th('Erreur')],
+            (r) => [r.action, runBadge(r.status), fmtDate(r.received_at), fmtDate(r.processed_at), r.error]);
           if (state.tab === 'state') return fillState('/admin/installations/' + enc(id) + '/state', panel);
           if (state.tab === 'rejected') return fillPaged('/admin/rejected?installationId=' + enc(id), panel,
-            ['Entité', 'Raison', 'Créé', 'Charge utile (masquée)', 'Action'],
-            (r) => [r.entity, r.reason, fmtDate(r.created_at),
-              revealCell('/admin/rejected/' + r.id + '/reveal', r.payload_json),
-              purgeBtn(r.installation_id, r.id, () => renderInstallation(id))]);
+            [th('Entité'), th('Raison'), th('Créé'), th('Charge utile (masquée)'), th('Action')],
+            (r) => [r.entity, r.reason, fmtDate(r.created_at), payloadCell('/admin/rejected/' + r.id + '/reveal', r.payload_json), purgeBtn(r.installation_id, r.id, () => renderInstallation(id))]);
         } catch (e) { clear(panel).appendChild(el('div', { class: 'empty', text: 'Erreur : ' + e.message })); }
       }
-      const enc = encodeURIComponent;
-      function badge(txt, cls) { return el('span', { class: 'badge ' + (cls || ''), text: txt || '—' }); }
-      function summarize(j) { try { const s = JSON.parse(j); return (s.mode || '') + ' · ' + (s.status || '') + (s.errors && s.errors.length ? ' · ' + s.errors.length + ' err' : ''); } catch (_) { return '—'; } }
 
-      // POST action helper (CSRF header attached by api()).
-      async function doAction(path, okMsg, after) {
-        try { await api(path, { method: 'POST', body: {} }); toast(okMsg); if (after) after(); }
-        catch (e) { if (e.message !== 'unauthorized') toast('Échec : ' + e.message, true); }
-      }
-      // Masked payload cell + an audited "reveal" button that swaps in the raw value.
-      function revealCell(path, masked) {
-        const pre = el('pre', { class: 'payload mono', text: masked || '—' });
-        const btn = el('button', { class: 'ghost', text: 'Révéler', style: 'margin-top:6px' });
-        btn.addEventListener('click', async () => {
-          btn.disabled = true;
-          try { const r = await api(path, { method: 'POST', body: {} }); pre.textContent = r.payload_json || '(vide)'; btn.textContent = 'Révélé (audité)'; }
-          catch (e) { btn.disabled = false; if (e.message !== 'unauthorized') toast('Échec : ' + e.message, true); }
-        });
-        return el('div', {}, [pre, el('div', {}, [btn])]);
-      }
-      // Scoped delete of one dead-lettered item (with confirmation).
       function purgeBtn(installationId, id, after) {
-        const b = el('button', { class: 'ghost', text: 'Supprimer' });
-        b.addEventListener('click', async () => {
-          if (!window.confirm('Supprimer définitivement ce rejet ?')) return;
-          b.disabled = true;
-          try { await api('/admin/rejected/purge', { method: 'POST', body: { installationId, ids: [id] } }); toast('Rejet supprimé'); if (after) after(); }
-          catch (e) { b.disabled = false; if (e.message !== 'unauthorized') toast('Échec : ' + e.message, true); }
+        return actionBtn({
+          label: 'Supprimer', icon: 'trash', variant: 'danger sm',
+          confirm: { title: 'Supprimer ce rejet ?', message: 'Cet élément dead-letter sera supprimé définitivement.', detail: 'Action irréversible et journalisée.', confirmLabel: 'Supprimer', icon: 'trash', danger: true },
+          toast: 'Rejet supprimé.', run: () => post('/admin/rejected/purge', { installationId, ids: [id] }), after,
         });
-        return b;
       }
 
       function fillOverview(d, panel) {
         clear(panel);
-        const cursors = (d.cursors || []).map((c) => [c.entity, c.source_key || '(global)', c.last_status || '—', fmtDate(c.last_synced_at), String(c.items), String(c.consecutive_failures)]);
-        const runs = (d.recentRuns || []).map((r) => [r.id, r.status, fmtDate(r.started_at), summarize(r.summary_json)]);
-        panel.appendChild(el('div', { class: 'row', style: 'align-items:flex-start; gap:16px' }, [
-          el('div', { style: 'flex:1; min-width:320px' }, [
-            el('div', { class: 'sub', style: 'margin-bottom:6px', text: 'Curseurs' }),
-            el('div', { class: 'tablewrap' }, [table(['Entité', 'Source', 'Statut', 'Dernière synchro', 'Items', 'Échecs'], cursors)]),
-          ]),
-          el('div', { style: 'flex:1; min-width:300px' }, [
-            el('div', { class: 'sub', style: 'margin-bottom:6px', text: 'Dernier webhook : ' + (d.lastWebhook ? d.lastWebhook.event + ' (' + fmtDate(d.lastWebhook.created_at) + ')' : '—') }),
-            el('div', { class: 'tablewrap' }, [table(['Run', 'Statut', 'Démarré', 'Résumé'], runs)]),
-          ]),
+        const cursors = (d.cursors || []).map((c) => [c.entity, c.source_key || '(global)', runBadge(c.last_status), fmtDate(c.last_synced_at), String(c.items), String(c.consecutive_failures)]);
+        const runs = (d.recentRuns || []).map((r) => [r.id, runBadge(r.status), fmtDate(r.started_at), summarize(r.summary_json)]);
+        panel.appendChild(el('div', {}, [
+          el('div', { class: 'section-title' }, ['Curseurs de synchronisation', tip(TIPS.cursor)]),
+          tableCard([th('Entité'), th('Source'), th('Statut'), th('Dernière synchro'), th('Items'), th('Échecs', TIPS.failures)], cursors, { emptyText: 'Aucun curseur — aucune synchro n’a encore tourné.' }),
+          el('div', { class: 'section-title' }, ['Synchros récentes', d.lastWebhook ? el('span', { class: 'muted small', text: '· dernier webhook : ' + d.lastWebhook.event + ' (' + fmtDate(d.lastWebhook.created_at) + ')' }) : null]),
+          tableCard([th('Run'), th('Statut'), th('Démarré'), th('Résumé')], runs, { emptyText: 'Aucune synchro récente.' }),
         ]));
       }
 
       async function fillState(path, panel) {
-        clear(panel).appendChild(el('div', { class: 'sub', text: 'Chargement…' }));
+        clear(panel).appendChild(tableCard(['', '', ''], [], { loading: 3 }));
         const res = await api(path);
         const rows = res.items.map((s) => [
           el('span', { class: 'mono', text: s.key }),
-          s.encrypted ? badge('chiffré', 'err') : badge('clair'),
+          s.encrypted ? badge('chiffré', 'brand') : badge('clair'),
           String(s.value_length),
-          s.encrypted ? el('span', { class: 'sub', text: '•••••• (secret jamais exposé)' }) : el('span', { class: 'mono', text: s.value_preview == null ? '—' : s.value_preview }),
+          s.encrypted ? el('span', { class: 'muted', text: '•••••• (secret jamais exposé)' }) : el('span', { class: 'mono', text: s.value_preview == null ? '—' : s.value_preview }),
           fmtDate(s.updated_at),
         ]);
-        clear(panel).appendChild(el('div', { class: 'tablewrap' }, [table(['Clé', 'Type', 'Longueur', 'Aperçu', 'Mise à jour'], rows)]));
+        clear(panel).appendChild(tableCard([th('Clé'), th('Type', TIPS.encrypted), th('Longueur'), th('Aperçu'), th('Mise à jour')], rows, { emptyText: 'Aucun état stocké.' }));
       }
 
       async function fillPaged(basePath, panel, cols, mapRow) {
         const pg = { limit: 25, offset: 0 };
         async function load() {
-          clear(panel).appendChild(el('div', { class: 'sub', text: 'Chargement…' }));
+          clear(panel).appendChild(tableCard(cols, [], { loading: 4 }));
           const sep = basePath.indexOf('?') >= 0 ? '&' : '?';
           const res = await api(basePath + sep + 'limit=' + pg.limit + '&offset=' + pg.offset);
-          const rows = res.items.map(mapRow);
-          clear(panel).appendChild(el('div', {}, [
-            el('div', { class: 'tablewrap' }, [table(cols, rows)]),
-            paginator(pg, res.total, (off) => { pg.offset = off; load(); }),
-          ]));
+          clear(panel).appendChild(el('div', {}, [tableCard(cols, res.items.map(mapRow), { emptyText: 'Aucun élément.' }), paginator(pg, res.total, (off) => { pg.offset = off; load(); })]));
         }
         return load();
       }
 
-      // ------------------------------------------------------------------ global rejected
+      // ================================================================= global rejected
       const rejPage = { limit: 25, offset: 0, entity: '' };
       async function renderRejected() {
         const ent = el('input', { placeholder: 'Filtrer par entité…', value: rejPage.entity });
         const apply = () => { rejPage.entity = ent.value.trim(); rejPage.offset = 0; renderRejected(); };
-        ent.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
-        const bar = el('div', { class: 'row', style: 'margin-bottom:14px' }, [ent, el('button', { text: 'Filtrer', onclick: apply })]);
-        shell('Rejets (dead-letter)', 'Éléments refusés par l’API ShopiMind lors d’un push', el('div', {}, [bar, el('div', { class: 'sub', text: 'Chargement…' })]));
+        const bar = filterBar(ent, [], apply);
+        const cols = [th('Installation', TIPS.installId), th('Entité'), th('Raison'), th('Créé'), th('Charge utile (masquée)'), th('Action')];
+        shell('Rejets (dead-letter)', 'Éléments refusés par l’API ShopiMind lors d’un push', el('div', {}, [bar, tableCard(cols, [], { loading: 4 })]));
         const params = new URLSearchParams({ limit: String(rejPage.limit), offset: String(rejPage.offset) });
         if (rejPage.entity) params.set('entity', rejPage.entity);
         const res = await api('/admin/rejected?' + params.toString());
         const rows = res.items.map((r) => [
-          el('span', { class: 'mono', text: r.installation_id }), r.entity, r.reason, fmtDate(r.created_at),
-          revealCell('/admin/rejected/' + r.id + '/reveal', r.payload_json),
-          purgeBtn(r.installation_id, r.id, renderRejected),
+          idCell(r.installation_id), r.entity, r.reason, fmtDate(r.created_at),
+          payloadCell('/admin/rejected/' + r.id + '/reveal', r.payload_json), purgeBtn(r.installation_id, r.id, renderRejected),
         ]);
-        shell('Rejets (dead-letter)', res.total + ' rejet(s)', el('div', {}, [
-          bar, el('div', { class: 'tablewrap' }, [table(['Installation', 'Entité', 'Raison', 'Créé', 'Charge utile (masquée)', 'Action'], rows)]),
+        shell('Rejets (dead-letter)', res.total + ' rejet' + (res.total > 1 ? 's' : ''), el('div', {}, [
+          bar, tableCard(cols, rows, { emptyText: 'Aucun rejet — tout passe. 🎉' }),
           paginator(rejPage, res.total, (off) => { rejPage.offset = off; renderRejected(); }),
         ]));
       }
 
-      // ------------------------------------------------------------------ audit
+      // ================================================================= audit
       const auditPage = { limit: 40, offset: 0 };
+      const AUDIT_TIP = 'Chaque action d’administration (connexion, synchro, reprovisioning, révélation, purge). Métadonnées uniquement — aucun secret, aucune PII brute.';
       async function renderAudit() {
-        shell('Journal d’audit', 'Actions d’administration (métadonnées uniquement)', el('div', { class: 'sub', text: 'Chargement…' }));
+        const cols = [th('Date'), th('Action', AUDIT_TIP), th('Installation'), th('Cible'), th('Détails'), th('IP')];
+        shell('Journal d’audit', 'Actions d’administration (métadonnées uniquement)', el('div', {}, [tableCard(cols, [], { loading: 6 })]));
         const res = await api('/admin/audit?limit=' + auditPage.limit + '&offset=' + auditPage.offset);
-        const rows = res.items.map((a) => [fmtDate(a.at), a.action, a.installation_id, a.target, a.details_json, a.ip]);
-        shell('Journal d’audit', res.total + ' entrée(s)', el('div', {}, [
-          el('div', { class: 'tablewrap' }, [table(['Date', 'Action', 'Installation', 'Cible', 'Détails', 'IP'], rows)]),
+        const rows = res.items.map((a) => [fmtDate(a.at), badge(a.action, a.action.indexOf('fail') >= 0 ? 'err' : ''), a.installation_id ? idCell(a.installation_id) : '—', a.target ? idCell(a.target) : '—', a.details_json, a.ip]);
+        shell('Journal d’audit', res.total + ' entrée' + (res.total > 1 ? 's' : ''), el('div', {}, [
+          tableCard(cols, rows, { emptyText: 'Aucune action enregistrée.' }),
           paginator(auditPage, res.total, (off) => { auditPage.offset = off; renderAudit(); }),
         ]));
       }
 
-      // ------------------------------------------------------------------ router
+      // ================================================================= router
       function go(view, id) {
         state.view = view === 'installation' ? 'installations' : view;
         if (view === 'installation') { state.instId = id; state.tab = 'overview'; }
-        const run = {
-          dashboard: renderDashboard, installations: renderInstallations,
-          installation: () => renderInstallation(id), rejected: renderRejected, audit: renderAudit,
-        }[view] || renderDashboard;
-        Promise.resolve().then(run).catch((e) => { if (e.message !== 'unauthorized') toast('Erreur : ' + e.message, true); });
+        const run = { dashboard: renderDashboard, installations: renderInstallations, installation: () => renderInstallation(id), rejected: renderRejected, audit: renderAudit }[view] || renderDashboard;
+        Promise.resolve().then(run).catch((e) => { if (e.message !== 'unauthorized') toast('Erreur : ' + e.message, 'err'); });
       }
 
       // Cold start: try the dashboard; a 401 bounces to the login screen.
