@@ -1,9 +1,15 @@
-import type { RawConfigs, WebhookResponse, RemoteDataResponse, ConfigSchema } from '../contracts/index.js';
+import type {
+  RawConfigs,
+  WebhookResponse,
+  RemoteDataResponse,
+  ConfigSchema,
+  LifecyclePayload,
+} from '../contracts/index.js';
 import type { Integration, IntegrationContext } from '../integration/types.js';
 import { SpmClient, type SpmHttpClient } from '@shopimind/sdk-js';
 import type { Repositories } from '../store/repositories.js';
 import type { Logger } from '../logging/logger.js';
-import { verifyShopimindSignature, type SignatureOptions } from '../security/signature.js';
+import { verifyShopimindSignatureMulti } from '../security/signature.js';
 import { redact } from '../security/redaction.js';
 import { saveConfigs, loadConfigs, sensitiveKeys } from '../config/config-store.js';
 import { runProvisioning } from '../provisioning/runner.js';
@@ -12,6 +18,25 @@ import { makeWithSource } from '../sdk/source-scope.js';
 import { makeSendBulk } from '../sdk/send-bulk.js';
 import { makeCustomData } from '../sdk/custom-data-scope.js';
 
+/** All keys present on ANY member of a (discriminated) union — distributes over `T`. */
+type KeysOfUnion<T> = T extends unknown ? keyof T : never;
+/** The value type of key `K` across every union member that declares it. */
+type ValueOfUnion<T, K extends PropertyKey> = T extends unknown ? (K extends keyof T ? T[K] : never) : never;
+
+/**
+ * Collapses the discriminated {@link LifecyclePayload} union into one flat object
+ * type carrying EVERY member field as optional. `event`/`id_shop_integration` are
+ * dropped so the wire type below can re-declare them with the tolerance the network
+ * forces. (`Partial<Omit<Union, K>>` distributes and keeps only the shared base
+ * fields — these distributive helpers correctly gather each member's own fields.)
+ */
+type AllLifecycleFields = {
+  [K in Exclude<KeysOfUnion<LifecyclePayload>, 'event' | 'id_shop_integration'>]?: ValueOfUnion<
+    LifecyclePayload,
+    K
+  >;
+};
+
 export const ACCESS_TOKEN_KEY = '__access_token';
 /** State key where the provisioning result (sourceIds/defIds) is stored. */
 export const PROVISIONING_KEY = '__provisioning';
@@ -19,7 +44,12 @@ export const PROVISIONING_KEY = '__provisioning';
 export interface DispatcherDeps<S> {
   integration: Integration<S>;
   repos: Repositories;
-  secret: string;
+  /**
+   * Webhook signing secret(s). A single string is the common case; an array opens a
+   * rotation window (E6) where a request signed with ANY listed secret passes —
+   * used while swapping `current` -> `next`. Backward compatible with a plain string.
+   */
+  secret: string | string[];
   toleranceSeconds?: number;
   logger: Logger;
   /** Builds the ShopiMind SDK client for an access_token. */
@@ -34,20 +64,21 @@ export interface HttpResult {
   body: WebhookResponse;
 }
 
-interface LifecycleRawPayload {
+/**
+ * Wire shape of an inbound lifecycle webhook, as parsed from the RAW body BEFORE
+ * any validation. It reuses the public {@link LifecyclePayload} contract but
+ * relaxes it in two ways the network boundary forces on us:
+ *   - `event` is `string` (unknown/garbage events must be handled, not crash),
+ *   - `id_shop_integration` tolerates a `string` (some legacy senders JSON-encode
+ *     the numeric alias as a string).
+ * Consuming the public type here (instead of a private duplicate) means a change
+ * to the author-facing contract is reflected at the dispatch boundary by
+ * construction. `Partial` because a malformed body may omit anything.
+ */
+type LifecycleRawPayload = AllLifecycleFields & {
   event?: string;
-  /** Opaque installation token. */
-  installation_id?: string;
   id_shop_integration?: number | string;
-  shop_domain?: string;
-  shop_name?: string;
-  access_token?: string;
-  configs?: RawConfigs;
-  installed_at?: string;
-  activated_at?: string;
-  deactivated_at?: string;
-  uninstalled_at?: string;
-}
+};
 
 /** Opaque installation id from the payload. */
 function installIdOf(p: LifecycleRawPayload): string | undefined {
@@ -73,10 +104,11 @@ export async function handleWebhook<S>(
   headers: Record<string, string | string[] | undefined>,
   deps: DispatcherDeps<S>,
 ): Promise<HttpResult> {
-  const sigOpts: SignatureOptions = { secret: deps.secret };
-  if (deps.toleranceSeconds != null) sigOpts.toleranceSeconds = deps.toleranceSeconds;
-  if (deps.now) sigOpts.now = deps.now;
-  const sig = verifyShopimindSignature(rawBody, headers, sigOpts);
+  // E6 — verify against one or several secrets (rotation window).
+  const sig = verifyShopimindSignatureMulti(rawBody, headers, deps.secret, {
+    ...(deps.toleranceSeconds != null ? { toleranceSeconds: deps.toleranceSeconds } : {}),
+    ...(deps.now ? { now: deps.now } : {}),
+  });
 
   let payload: LifecycleRawPayload;
   try {
@@ -188,7 +220,7 @@ async function onActivate<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>): P
 
   if (deps.integration.provisioning) {
     const plan = await deps.integration.provisioning(ctx);
-    const prov = await runProvisioning(ctx.spm, plan);
+    const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
     deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
     if (prov.errors.length > 0) {
       // Count ALL successful resources (sources, defs, events, statuses) — not
@@ -241,7 +273,7 @@ async function onConfigUpdated<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S
     const ctx = buildContext(id, deps);
     if (deps.integration.provisioning) {
       const plan = await deps.integration.provisioning(ctx);
-      const prov = await runProvisioning(ctx.spm, plan);
+      const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
       deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
     }
     if (deps.integration.hooks?.onConfigUpdated) await deps.integration.hooks.onConfigUpdated(ctx);

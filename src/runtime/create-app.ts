@@ -13,12 +13,18 @@ import { makeWithSource } from '../sdk/source-scope.js';
 import { makeCustomData } from '../sdk/custom-data-scope.js';
 import { makeSendBulk } from '../sdk/send-bulk.js';
 import { createRateLimiter } from './rate-limiter.js';
+import { buildHealthReport, buildOverview } from './health.js';
 import { createServer } from '../http/server.js';
 import { buildRoutes } from '../http/routes.js';
 
 export interface CreateAppOptions<S> {
   databasePath: string;
-  webhookSecret: string;
+  /**
+   * Webhook signing secret(s). A single string is the common case; pass an array to
+   * open a secret ROTATION window (E6) — a webhook signed with ANY listed secret is
+   * accepted while you swap `current` -> `next`. Backward compatible with a string.
+   */
+  webhookSecret: string | string[];
   /**
    * Override for the ShopiMind SDK base URL (otherwise env `SHOPIMIND_CORE_API_BASE`,
    * then `https://core.shopimind.com`). Useful in tests / preprod.
@@ -39,6 +45,12 @@ export interface CreateAppOptions<S> {
   adminToken?: string | null;
   signatureToleranceSeconds?: number;
   backfillDays?: number;
+  /**
+   * Defensive overlap (E9) applied to every INCREMENTAL sync window: shifts `since`
+   * back by this many seconds so a boundary item is not missed. Idempotent (upserts).
+   * Default 0 (no overlap).
+   */
+  overlapSeconds?: number;
   port?: number;
   host?: string;
   logger?: Logger;
@@ -142,8 +154,14 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
           runs: repos.runs,
           makeSource: (sb) => makeWithSource(repos.state, id, PROVISIONING_KEY, sb),
           makeCustomData: (sb) => makeCustomData(repos.state, id, PROVISIONING_KEY, sb, base.spm),
+          // E4 — feed the dead-letter sink so rejected items survive the run.
+          rejectedItems: repos.rejectedItems,
         },
-        { fullBackfill: o?.full ?? false, backfillDays },
+        {
+          fullBackfill: o?.full ?? false,
+          backfillDays,
+          ...(opts.overlapSeconds != null ? { overlapSeconds: opts.overlapSeconds } : {}),
+        },
       );
     } finally {
       running.delete(id);
@@ -188,6 +206,11 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
       webhookRateLimit,
       runSyncForInstall: (id, full) => runSyncOnce(id, { full }),
       recentRuns: (id) => repos.runs.recent(id),
+      // E4 — dead-lettered rejects for an installation (admin, bounded).
+      rejectedItems: (id, limit) => repos.rejectedItems.listByInstallation(id, limit),
+      // E5 — enriched health probe + admin overview.
+      healthReport: () => buildHealthReport(db, repos, opts.now ? opts.now() : Date.now()),
+      overview: () => buildOverview(repos, opts.now ? opts.now() : Date.now()),
       inbound: {
         integration,
         repos,
@@ -235,8 +258,15 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
       const log = repos.webhookLog.purgeOlderThan(retentionDays);
       const seen = repos.webhookSeen.purgeOlderThan(retentionDays);
       const inbound = repos.inboundEvents.purgeOlderThan(retentionDays);
-      if (log + seen + inbound > 0) {
-        logger.info('retention purge', { webhook_log: log, webhook_seen: seen, inbound_event: inbound, retentionDays });
+      const rejected = repos.rejectedItems.purgeOlderThan(retentionDays); // E4 dead-letter (90j)
+      if (log + seen + inbound + rejected > 0) {
+        logger.info('retention purge', {
+          webhook_log: log,
+          webhook_seen: seen,
+          inbound_event: inbound,
+          rejected_item: rejected,
+          retentionDays,
+        });
       }
     } catch (e) {
       logger.error('retention purge failed', { error: e instanceof Error ? e.message : String(e) });

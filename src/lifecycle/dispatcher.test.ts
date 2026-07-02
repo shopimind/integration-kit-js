@@ -172,6 +172,41 @@ describe('handleWebhook', () => {
     expect(repos.installs.find('1')?.status).toBe('active');
   });
 
+  it('activates with the REAL NestJS payload (opaque installation_id, no legacy fields)', async () => {
+    // The current wire format sends { event, installation_id, access_token, configs }
+    // and NOTHING legacy (no id_shop_integration / id_shop / integration_slug). The
+    // dispatcher must key entirely off the opaque installation_id.
+    const after = vi.fn();
+    const { repos, deps } = setup(true, after);
+    const { body, headers } = signed({
+      event: 'integration.activated',
+      installation_id: 'inst_opaque_abc123',
+      access_token: 'int_TOKEN',
+      configs: { account: 'demo', hiboutik_api_key: 'SECRETKEY' },
+    });
+    const res = await handleWebhook(body, headers, deps);
+    expect(res.body.success).toBe(true);
+    expect(repos.installs.find('inst_opaque_abc123')?.status).toBe('active');
+    expect(after).toHaveBeenCalledWith('inst_opaque_abc123');
+    // installation_id wins even if a legacy id_shop_integration is NOT provided.
+    expect(repos.installs.find('1')).toBeUndefined();
+  });
+
+  it('prefers installation_id over the legacy id_shop_integration when both are present', async () => {
+    const { repos, deps } = setup();
+    const { body, headers } = signed({
+      event: 'integration.installed',
+      installation_id: 'inst_opaque_xyz',
+      id_shop_integration: 42, // legacy alias — must be ignored in favour of the opaque token
+      access_token: 'int_T',
+      configs: {},
+    });
+    const res = await handleWebhook(body, headers, deps);
+    expect(res.body.success).toBe(true);
+    expect(repos.installs.find('inst_opaque_xyz')?.status).toBe('inactive');
+    expect(repos.installs.find('42')).toBeUndefined();
+  });
+
   it('unknown event -> success:false', async () => {
     const { deps } = setup();
     const { body, headers } = signed({ event: 'integration.frobnicated', id_shop_integration: 1 });

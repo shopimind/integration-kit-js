@@ -39,6 +39,49 @@ describe('CursorRepo (per-source cursor)', () => {
   });
 });
 
+describe('CursorRepo - consecutive_failures & health helpers (E3/E5)', () => {
+  it('defaults consecutive_failures to 0 and persists/keeps it via COALESCE', () => {
+    const r = repos();
+    r.cursors.set('inst', 'orders', '', { last_synced_at: '2026-06-20' });
+    expect(r.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(0);
+    // Set a count explicitly.
+    r.cursors.set('inst', 'orders', '', { last_synced_at: null, last_status: 'error', consecutive_failures: 3 });
+    expect(r.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(3);
+    // Omitting it on a later write keeps the previous value (COALESCE).
+    r.cursors.set('inst', 'orders', '', { last_synced_at: '2026-06-21', last_status: 'ok' });
+    expect(r.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(3);
+  });
+
+  it('countInError + listByInstallation', () => {
+    const r = repos();
+    r.cursors.set('inst', 'orders', '', { last_synced_at: null, last_status: 'error' });
+    r.cursors.set('inst', 'products', '', { last_synced_at: '2026-06-21', last_status: 'ok' });
+    expect(r.cursors.countInError()).toBe(1);
+    expect(r.cursors.listByInstallation('inst')).toHaveLength(2);
+  });
+});
+
+describe('RejectedItemRepo (E4 dead-letter)', () => {
+  it('adds and lists rejected items (newest first, bounded)', () => {
+    const r = repos();
+    r.rejectedItems.add({ installation_id: 'inst', run_id: 1, entity: 'orders', payload_json: '{"id":1}', reason: 'bad' });
+    r.rejectedItems.add({ installation_id: 'inst', run_id: 1, entity: 'orders', payload_json: '{"id":2}', reason: 'bad' });
+    r.rejectedItems.add({ installation_id: 'other', run_id: 1, entity: 'orders', payload_json: '{"id":3}' });
+    const list = r.rejectedItems.listByInstallation('inst');
+    expect(list).toHaveLength(2);
+    expect(JSON.parse(list[0]?.payload_json ?? '{}').id).toBe(2); // newest first
+  });
+
+  it('purgeOlderThan removes old rows, keeps recent', () => {
+    const db = openDatabase(':memory:');
+    const r = createRepositories(db, cipher);
+    r.rejectedItems.add({ installation_id: 'inst', payload_json: '{"id":1}' });
+    db.prepare(`INSERT INTO rejected_item (installation_id, payload_json, created_at) VALUES ('inst','{}', datetime('now','-100 days'))`).run();
+    expect(r.rejectedItems.purgeOlderThan(30)).toBe(1);
+    expect(r.rejectedItems.listByInstallation('inst')).toHaveLength(1);
+  });
+});
+
 describe('RunRepo', () => {
   it('start / finish / recent', () => {
     const r = repos();

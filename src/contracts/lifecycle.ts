@@ -11,10 +11,40 @@ export type LifecycleEvent =
   | 'integration.uninstalled'
   | 'integration.config_updated';
 
+/**
+ * Common fields of a lifecycle webhook payload.
+ *
+ * IDENTITY CONTRACT — `installation_id` is the SINGLE source of truth. It is the
+ * OPAQUE token ShopiMind issues per installation; the integration never
+ * interprets it, it only correlates by it (see the store schema). NestJS sends
+ * `{ event, installation_id, ... }` — nothing else is required to route the event.
+ *
+ * The `id_shop_integration` numeric alias is LEGACY: it predates the opaque token
+ * and is kept ONLY so an older ShopiMind deployment (or an old fixture) that still
+ * emits it keeps working. The dispatcher reads `installation_id` FIRST and falls
+ * back to `id_shop_integration` only when the opaque token is absent. New payloads
+ * must not rely on it.
+ */
 export interface LifecyclePayloadBase {
   event: LifecycleEvent;
-  id_shop_integration: number;
+  /** OPAQUE installation token — the required identity of the installation. */
+  installation_id: string;
+  /**
+   * @deprecated Legacy numeric alias for `installation_id`. Retained for
+   * backward compatibility with older ShopiMind deployments/fixtures; the
+   * dispatcher only uses it as a fallback when `installation_id` is absent.
+   */
+  id_shop_integration?: number;
+  /**
+   * @deprecated ShopiMind-internal shop id. Never sent by the current wire format
+   * and never needed by an integration (which correlates by `installation_id`).
+   * Kept optional so an old payload carrying it does not fail to type-check.
+   */
   id_shop?: number;
+  /**
+   * @deprecated The integration already knows its own slug (`integration.slug`);
+   * ShopiMind does not send this. Kept optional for backward compatibility only.
+   */
   integration_slug?: string;
   shop_domain?: string;
   shop_name?: string;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { verifyShopimindSignature, signShopimindBody } from './signature.js';
+import { verifyShopimindSignature, verifyShopimindSignatureMulti, signShopimindBody } from './signature.js';
 
 const SECRET = 'whsec_test';
 const body = JSON.stringify({ event: 'integration.activated', id_shop_integration: 1 });
@@ -38,5 +38,30 @@ describe('verifyShopimindSignature', () => {
   it('rejects a wrong secret key', () => {
     const sig = signShopimindBody(body, 'other', ts);
     expect(verifyShopimindSignature(body, headers(ts, sig), { secret: SECRET, now }).ok).toBe(false);
+  });
+});
+
+describe('verifyShopimindSignatureMulti (E6 rotation window)', () => {
+  it('accepts a signature made with a single string secret (backward compatible)', () => {
+    const sig = signShopimindBody(body, SECRET, ts);
+    expect(verifyShopimindSignatureMulti(body, headers(ts, sig), SECRET, { now })).toEqual({ ok: true });
+  });
+
+  it('accepts a signature made with EITHER secret in the rotation window', () => {
+    const sigCurrent = signShopimindBody(body, 'current_secret', ts);
+    const sigNext = signShopimindBody(body, 'next_secret', ts);
+    const secrets = ['current_secret', 'next_secret'];
+    expect(verifyShopimindSignatureMulti(body, headers(ts, sigCurrent), secrets, { now }).ok).toBe(true);
+    expect(verifyShopimindSignatureMulti(body, headers(ts, sigNext), secrets, { now }).ok).toBe(true);
+  });
+
+  it('rejects a signature made with a secret NOT in the list', () => {
+    const sig = signShopimindBody(body, 'unknown', ts);
+    expect(verifyShopimindSignatureMulti(body, headers(ts, sig), ['a', 'b'], { now }).ok).toBe(false);
+  });
+
+  it('rejects when no secret is configured', () => {
+    const sig = signShopimindBody(body, SECRET, ts);
+    expect(verifyShopimindSignatureMulti(body, headers(ts, sig), [], { now })).toEqual({ ok: false, reason: 'no_secret_configured' });
   });
 });

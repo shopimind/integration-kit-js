@@ -132,4 +132,41 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 5,
+    name: 'cursor_failure_escalation',
+    sql: `
+      -- Repeated-failure escalation (E3). A run-level counter per cursor:
+      --   - incremented every time the step fails/holds (last_status = 'error'),
+      --   - reset to 0 on a clean advance.
+      -- The engine uses it for EXPONENTIAL backoff (skip 2^(k-1) ticks, capped ~24h)
+      -- so a persistently-failing source stops hammering a broken upstream every tick,
+      -- and escalates to an ERROR log at the 3rd consecutive failure. The GOLDEN RULE
+      -- is untouched: this only decides WHEN to retry, never whether the cursor moves.
+      ALTER TABLE sync_cursor ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    version: 6,
+    name: 'rejected_item_dead_letter',
+    sql: `
+      -- Dead-letter of per-item REJECTIONS (E4). When a bulk push reports rejected
+      -- items (validation, permanent-ish), the engine records them here instead of
+      -- letting the warn scroll away — so an operator can inspect what the API refused
+      -- and, later, replay it. Bounded per run (the engine caps inserts at 500/run) to
+      -- keep a poison batch from flooding the store. Subject to the same retention purge
+      -- as the other log tables.
+      CREATE TABLE rejected_item (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        installation_id  TEXT NOT NULL,
+        run_id           INTEGER,
+        entity           TEXT,
+        source_key       TEXT,
+        payload_json     TEXT,
+        reason           TEXT,
+        created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_rejected_item_install ON rejected_item(installation_id, created_at);
+    `,
+  },
 ];

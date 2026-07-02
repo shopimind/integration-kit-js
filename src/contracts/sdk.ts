@@ -10,6 +10,18 @@ export interface NewDataSource {
   type: string;
   parent_id?: number;
   config?: string;
+  /**
+   * STABLE MATCHING KEY (E16). Name of a property inside the source's `config`
+   * (parsed as JSON) that uniquely and PERMANENTLY identifies this source — e.g.
+   * `'hiboutik_store_id'`. When set, `ensureDataSource` matches an existing source by
+   * `config[stableConfigKey]` FIRST, falling back to the `label` only if no config
+   * match is found. This lets a source survive a LABEL RENAME (a merchant renaming
+   * their store no longer spawns a duplicate; the existing source's label is updated
+   * to the new one). Omit it to keep the legacy label-only behaviour unchanged.
+   *
+   * This field is kit-only authoring metadata: it is NOT forwarded to the API.
+   */
+  stableConfigKey?: string;
 }
 
 /**
@@ -68,14 +80,22 @@ export interface NewCustomDataDefinition {
   }>;
 }
 
-/** Order status to provision (declaration). */
+/**
+ * Order status to provision (declaration).
+ *
+ * `status_id`, `lang` and `name` are the AUTHORING essentials. The technical
+ * bookkeeping fields (`is_deleted`, `created_at`, `updated_at`) are OPTIONAL (E11):
+ * the kit fills sensible defaults at provisioning time (`is_deleted: false`,
+ * timestamps: now), so an author no longer has to hand-write ceremony the API needs
+ * but the integration doesn't care about. Supplying them explicitly still works.
+ */
 export interface SpmOrderStatus {
   status_id: string;
   lang: string;
   name: string;
-  is_deleted: boolean;
-  created_at: string;
-  updated_at: string;
+  is_deleted?: boolean;
+  created_at?: string;
+  updated_at?: string;
   id_data_source?: number;
 }
 

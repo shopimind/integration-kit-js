@@ -51,6 +51,7 @@ export * from './logging/logger.js';
 
 // Integration authoring contract
 export * from './integration/define-integration.js';
+export * from './integration/define-bulk-step.js';
 export type * from './integration/types.js';
 
 // Neutral integration manifest (describes the integration in a portable way)
@@ -61,6 +62,8 @@ export * from './http/server.js';
 export * from './http/routes.js';
 export * from './runtime/create-app.js';
 export * from './runtime/rate-limiter.js';
+export * from './runtime/health.js';
+export * from './runtime/outbound.js';
 
 // Test helpers
 export * from './testing/harness.js';
