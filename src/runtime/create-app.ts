@@ -8,6 +8,7 @@ import { createLogger, type Logger } from '../logging/logger.js';
 import { loadConfigs } from '../config/config-store.js';
 import { runIntegrationSync, type SyncSummary } from '../sync/engine.js';
 import { ACCESS_TOKEN_KEY, PROVISIONING_KEY, type DispatcherDeps } from '../lifecycle/dispatcher.js';
+import { runProvisioning } from '../provisioning/runner.js';
 import { ensureInboundSecret } from '../lifecycle/inbound.js';
 import { makeWithSource } from '../sdk/source-scope.js';
 import { makeCustomData } from '../sdk/custom-data-scope.js';
@@ -16,6 +17,11 @@ import { createRateLimiter } from './rate-limiter.js';
 import { buildHealthReport, buildOverview } from './health.js';
 import { createServer } from '../http/server.js';
 import { buildRoutes } from '../http/routes.js';
+import { buildAdminRoutes } from '../http/admin-routes.js';
+import { AdminSessionManager } from '../http/admin-session.js';
+import { buildAdminData } from './admin-data.js';
+import { buildAdminActions } from './admin-actions.js';
+import { KIT_VERSION } from './kit-version.js';
 
 export interface CreateAppOptions<S> {
   databasePath: string;
@@ -69,11 +75,41 @@ export interface CreateAppOptions<S> {
    * disables the purge (tables then grow unbounded).
    */
   retentionDays?: number;
+  /**
+   * Retention (in DAYS) for the E4 dead-letter (`rejected_item`). Defaults to
+   * `retentionDays`. Raise it to keep refused items longer for forensics.
+   */
+  rejectedRetentionDays?: number;
+  /**
+   * Retention (in DAYS) for the admin audit trail (`audit_log`). Default 365. A
+   * value <= 0 disables the audit purge.
+   */
+  auditRetentionDays?: number;
+  /**
+   * If set, serves the admin surface (`/admin/*` + the operations UI) on a SEPARATE
+   * listener/port instead of the public server. Strongly recommended: keep this port
+   * on a private interface / behind the orchestrator and expose only the public port
+   * (webhooks/inbound/health). When omitted, admin routes share the public server.
+   */
+  adminPort?: number;
+  /**
+   * Host/interface for the admin listener (only when `adminPort` is set). Defaults to
+   * `127.0.0.1` (loopback) — a safe default that does NOT expose the admin surface on
+   * every interface. Set explicitly to bind elsewhere.
+   */
+  adminHost?: string;
+  /**
+   * Marks the admin session cookie `Secure` (HTTPS-only). Default false for plain-HTTP
+   * local dev; set true in any real deployment (and serve the UI over HTTPS).
+   */
+  adminSecureCookie?: boolean;
   now?: () => number;
 }
 
 export interface IntegrationApp {
   server: Server;
+  /** Present only in two-listener mode (`adminPort` set): the dedicated admin/operations server. */
+  adminServer?: Server;
   db: Db;
   repos: Repositories;
   start(): Promise<void>;
@@ -168,6 +204,35 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
     }
   };
 
+  // Re-runs the integration's provisioning for an installation (admin action).
+  // Idempotent find-or-create; persists the refreshed source/def id maps exactly
+  // like the lifecycle dispatcher does on activate / config-update.
+  const reprovision = async (
+    id: string,
+  ): Promise<{ sources: number; defs: number; events: number; orderStatuses: number; errors: string[] }> => {
+    const ctx = buildContext(id);
+    if (!ctx) throw new Error('unknown_installation');
+    if (!integration.provisioning) return { sources: 0, defs: 0, events: 0, orderStatuses: 0, errors: [] };
+    // Share the per-installation lock: reprovision rewrites PROVISIONING_KEY, which a
+    // concurrent sync reads for its source/def ids — the two must never overlap.
+    if (running.has(id)) throw new Error('busy: a sync or reprovision is already running for this installation');
+    running.add(id);
+    try {
+      const plan = await integration.provisioning(ctx);
+      const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
+      repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
+      return {
+        sources: Object.keys(prov.sourceIds).length,
+        defs: Object.keys(prov.defIds).length,
+        events: prov.events,
+        orderStatuses: prov.orderStatuses,
+        errors: prov.errors,
+      };
+    } finally {
+      running.delete(id);
+    }
+  };
+
   const autoBackfill = opts.autoBackfillOnActivate ?? true;
   const dispatcher: DispatcherDeps<S> = {
     integration,
@@ -197,31 +262,78 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
   // Per-IP limiter for POST /webhook/receive: bounds a flood of unsigned/forged
   // requests before the (costly) HMAC verification runs.
   const webhookRateLimit = createRateLimiter(opts.now ? { now: opts.now } : {});
-  const server = createServer({ port: opts.port ?? 8080, ...(opts.host ? { host: opts.host } : {}) });
-  server.route(
-    buildRoutes({
-      dispatcher,
-      adminToken: opts.adminToken ?? null,
-      adminRateLimit,
-      webhookRateLimit,
-      runSyncForInstall: (id, full) => runSyncOnce(id, { full }),
-      recentRuns: (id) => repos.runs.recent(id),
-      // E4 — dead-lettered rejects for an installation (admin, bounded).
-      rejectedItems: (id, limit) => repos.rejectedItems.listByInstallation(id, limit),
-      // E5 — enriched health probe + admin overview.
-      healthReport: () => buildHealthReport(db, repos, opts.now ? opts.now() : Date.now()),
-      overview: () => buildOverview(repos, opts.now ? opts.now() : Date.now()),
-      inbound: {
-        integration,
-        repos,
-        logger,
-        buildContext,
-        rateLimit: inboundRateLimit,
-        ...(opts.signatureToleranceSeconds != null ? { toleranceSeconds: opts.signatureToleranceSeconds } : {}),
-        ...(opts.now ? { now: opts.now } : {}),
-      },
-    }),
-  );
+  const publicPort = opts.port ?? 8080;
+  const server = createServer({ port: publicPort, ...(opts.host ? { host: opts.host } : {}) });
+  const nowMs = (): number => (opts.now ? opts.now() : Date.now());
+  const adminData = buildAdminData(repos, { kitVersion: KIT_VERSION, now: nowMs });
+  const adminActions = buildAdminActions(repos, { reprovision });
+  const adminSessions = new AdminSessionManager({ now: nowMs, secureCookie: opts.adminSecureCookie ?? false });
+
+  const publicRoutes = buildRoutes({
+    dispatcher,
+    webhookRateLimit,
+    // E5 — enriched health probe (DB ping, run ages, cursors in error).
+    healthReport: () => buildHealthReport(db, repos, nowMs()),
+    inbound: {
+      integration,
+      repos,
+      logger,
+      buildContext,
+      rateLimit: inboundRateLimit,
+      ...(opts.signatureToleranceSeconds != null ? { toleranceSeconds: opts.signatureToleranceSeconds } : {}),
+      ...(opts.now ? { now: opts.now } : {}),
+    },
+  });
+  const adminRoutes = buildAdminRoutes({
+    adminToken: opts.adminToken ?? null,
+    adminRateLimit,
+    data: adminData,
+    sessions: adminSessions,
+    actions: adminActions,
+    // E5 — admin overview across installations.
+    overview: () => buildOverview(repos, nowMs()),
+    // E4 — dead-lettered rejects for one installation (bounded, RAW payloads, operator-only).
+    rejectedItems: (id, limit) => repos.rejectedItems.listByInstallation(id, limit),
+    runSyncForInstall: (id, full) => runSyncOnce(id, { full }),
+    recentRuns: (id) => repos.runs.recent(id),
+  });
+
+  // Two-listener mode: when `adminPort` differs from the public port, the admin
+  // surface gets its OWN server (default loopback host), so the public interface only
+  // exposes webhooks/inbound/health. Otherwise both share the public server.
+  // A configured adminPort means "separate listener". When both ports are 0 (ephemeral),
+  // they still bind to two distinct OS-assigned ports, so honour the split there too.
+  const separateAdmin = opts.adminPort != null && (opts.adminPort !== publicPort || publicPort === 0);
+  let adminServer: Server | null = null;
+  if (separateAdmin) {
+    server.route(publicRoutes);
+    adminServer = createServer({ port: opts.adminPort as number, host: opts.adminHost ?? '127.0.0.1' });
+    adminServer.route(adminRoutes);
+  } else {
+    server.route([...publicRoutes, ...adminRoutes]);
+  }
+
+  // ---- Security posture warnings (loud, once, at construction) ---------------
+  // Only relevant when the admin surface is actually usable (a token is configured).
+  if (opts.adminToken) {
+    if (opts.adminToken.length < 32) {
+      logger.warn('adminToken is short: use a 32+ character high-entropy secret (a short token is easier to brute-force).', {
+        length: opts.adminToken.length,
+      });
+    }
+    if (!separateAdmin && (opts.host ?? '0.0.0.0') === '0.0.0.0') {
+      logger.warn(
+        'admin surface (/admin/*) is served on the PUBLIC listener bound to 0.0.0.0. It is token-gated, ' +
+          'but prefer `adminPort` on a private/loopback interface, or restrict it at the ingress.',
+      );
+    }
+    if (!opts.adminSecureCookie) {
+      logger.warn(
+        'adminSecureCookie is off: the admin session cookie is not marked Secure. Serve the admin UI over HTTPS ' +
+          'and set adminSecureCookie in any real deployment.',
+      );
+    }
+  }
 
   // ---- Internal scheduler (periodic incremental sync) -----------------------
   const intervalMinutes = opts.syncIntervalMinutes ?? 15;
@@ -244,28 +356,39 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
           });
         }
       }
+    } catch (e) {
+      // e.g. the listActive() query itself failing — must not become an unhandled rejection.
+      logger.error('scheduled sync sweep failed', { error: e instanceof Error ? e.message : String(e) });
     } finally {
       sweeping = false;
     }
   };
 
-  // ---- Retention: bounded growth of the log / anti-replay tables -------------
+  // ---- Retention: bounded growth of the log / dead-letter / audit tables -----
   const retentionDays = opts.retentionDays ?? 90;
-  const retentionEnabled = retentionDays > 0;
+  const rejectedRetentionDays = opts.rejectedRetentionDays ?? retentionDays;
+  const auditRetentionDays = opts.auditRetentionDays ?? 365;
+  const retentionEnabled = retentionDays > 0 || rejectedRetentionDays > 0 || auditRetentionDays > 0;
   let retentionTimer: ReturnType<typeof setInterval> | null = null;
   const purgeOldRecords = (): void => {
     try {
-      const log = repos.webhookLog.purgeOlderThan(retentionDays);
-      const seen = repos.webhookSeen.purgeOlderThan(retentionDays);
-      const inbound = repos.inboundEvents.purgeOlderThan(retentionDays);
-      const rejected = repos.rejectedItems.purgeOlderThan(retentionDays); // E4 dead-letter (90j)
-      if (log + seen + inbound + rejected > 0) {
+      const log = retentionDays > 0 ? repos.webhookLog.purgeOlderThan(retentionDays) : 0;
+      const seen = retentionDays > 0 ? repos.webhookSeen.purgeOlderThan(retentionDays) : 0;
+      const inbound = retentionDays > 0 ? repos.inboundEvents.purgeOlderThan(retentionDays) : 0;
+      const rejected = rejectedRetentionDays > 0 ? repos.rejectedItems.purgeOlderThan(rejectedRetentionDays) : 0; // E4 dead-letter
+      const runs = retentionDays > 0 ? repos.runs.purgeOlderThan(retentionDays) : 0; // sync-run history
+      const audit = auditRetentionDays > 0 ? repos.audit.purgeOlderThan(auditRetentionDays) : 0; // admin trail
+      if (log + seen + inbound + rejected + runs + audit > 0) {
         logger.info('retention purge', {
           webhook_log: log,
           webhook_seen: seen,
           inbound_event: inbound,
           rejected_item: rejected,
+          sync_run: runs,
+          audit_log: audit,
           retentionDays,
+          rejectedRetentionDays,
+          auditRetentionDays,
         });
       }
     } catch (e) {
@@ -275,11 +398,16 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
 
   return {
     server,
+    ...(adminServer ? { adminServer } : {}),
     db,
     repos,
     start: async () => {
       await server.start();
       logger.info('integration started', { uri: server.info.uri });
+      if (adminServer) {
+        await adminServer.start();
+        logger.info('admin surface started on a separate listener', { uri: adminServer.info.uri });
+      }
       if (autoSync) {
         timer = setInterval(() => {
           void sweep();
@@ -291,7 +419,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
         purgeOldRecords();
         retentionTimer = setInterval(() => purgeOldRecords(), 24 * 60 * 60_000);
         retentionTimer.unref();
-        logger.info('retention enabled', { retentionDays });
+        logger.info('retention enabled', { retentionDays, rejectedRetentionDays, auditRetentionDays });
       }
     },
     stop: async () => {
@@ -302,6 +430,13 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
       if (retentionTimer) {
         clearInterval(retentionTimer);
         retentionTimer = null;
+      }
+      if (adminServer) {
+        try {
+          await adminServer.stop();
+        } catch {
+          /* admin server not started */
+        }
       }
       try {
         await server.stop();

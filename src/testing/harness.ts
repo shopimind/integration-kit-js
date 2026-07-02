@@ -12,6 +12,8 @@ export interface TestAppOptions {
   secret?: string;
   /** Fixed clock (default). */
   now?: () => number;
+  /** Admin token for exercising /admin/* endpoints in tests (default: none -> admin routes 401). */
+  adminToken?: string;
 }
 
 export interface TestApp extends IntegrationApp {
@@ -39,6 +41,7 @@ export function makeTestApp<S>(integration: Integration<S>, opts: TestAppOptions
     autoSync: false,
     now: fixedNow,
     logger: createLogger({ sink: () => {} }),
+    ...(opts.adminToken ? { adminToken: opts.adminToken } : {}),
   });
 
   return {

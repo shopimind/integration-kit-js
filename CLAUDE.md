@@ -62,6 +62,18 @@ déclarations — elle ne réimplémente jamais l'infra.
 - `provisioning/` — find-or-create idempotent (sources de données, custom data + relations, events).
   Relations custom→custom : la cible peut être désignée par NOM (déf sœur), résolue en id à la création.
 - `lifecycle/`, `http/`, `runtime/` — dispatcher de cycle de vie, serveur Hapi, assemblage (`createIntegrationApp`).
+- **Surface admin & UI d'exploitation** (100 % côté intégrateur, ne lit que le SQLite local) :
+  - `http/admin-auth.ts` (comparaison timing-safe du jeton), `http/admin-session.ts` (session
+    navigateur : cookie HttpOnly `SameSite=Strict` + CSRF, TTL glissant, cap LRU),
+    `http/admin-routes.ts` (routes `/admin/*` : lecture paginée, actions auditées, `/admin/ui`).
+  - `runtime/admin-data.ts` (provider lecture → DTO, **masque la PII**, ne matérialise jamais un
+    secret), `runtime/admin-actions.ts` (purge/reveal/reprovision + écriture audit),
+    `security/pii-mask.ts` (masquage e-mail/téléphone/nom/adresse).
+  - `admin-ui/ui.html` = UI vanilla autonome (aucune dépendance) **embarquée** dans
+    `http/admin-ui.generated.ts` par `scripts/embed-admin-ui.mjs` (hooks `prebuild`/`pretest`) ;
+    servie avec une CSP à nonce par requête. Régénérer via `yarn embed:ui` après toute édition du HTML.
+  - Options `createIntegrationApp` : `adminToken`, `adminPort`/`adminHost` (listener séparé, loopback
+    par défaut), `adminSecureCookie`, `rejectedRetentionDays`, `auditRetentionDays`.
 
 ## Identité git
 - Org GitHub : `shopimind`. Committer/pousser avec le compte **pro** du mainteneur (pas un compte perso).

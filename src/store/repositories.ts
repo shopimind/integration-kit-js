@@ -8,12 +8,17 @@ import type {
   SyncRunRow,
   InboundEventRow,
   RejectedItemRow,
+  WebhookLogRow,
+  AuditRow,
 } from './types.js';
 
 const nn = <T>(v: T | undefined): T | null => (v === undefined ? null : v);
 
 /** GCM AAD binding an encrypted secret to its exact location (anti-relocation). */
 const aadFor = (installationId: string, key: string): string => `${installationId}:${key}`;
+
+/** Escapes LIKE metacharacters (`%`, `_`, `\`) so a search term matches literally. */
+const likeEscape = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /** Installs (one row per installation). COALESCE upsert: a null field does not overwrite. */
 export class InstallRepo {
@@ -88,6 +93,37 @@ export class InstallRepo {
   listActive(): InstallRow[] {
     return this.db.prepare(`SELECT * FROM installs WHERE status = 'active'`).all() as InstallRow[];
   }
+
+  /** Paginated list for the admin UI. `q` = case-insensitive LIKE across id/domain/name. */
+  list(f: { status?: string; q?: string; limit: number; offset: number }): { items: InstallRow[]; total: number } {
+    const where: string[] = [];
+    const params: Record<string, unknown> = {};
+    if (f.status) {
+      where.push('status = @status');
+      params.status = f.status;
+    }
+    if (f.q) {
+      where.push(`(installation_id LIKE @q ESCAPE '\\' OR shop_domain LIKE @q ESCAPE '\\' OR shop_name LIKE @q ESCAPE '\\')`);
+      params.q = `%${likeEscape(f.q)}%`;
+    }
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const total = (this.db.prepare(`SELECT COUNT(*) AS n FROM installs ${clause}`).get(params) as { n: number }).n;
+    const limit = Math.max(1, Math.min(f.limit, 200));
+    const items = this.db
+      .prepare(`SELECT * FROM installs ${clause} ORDER BY updated_at DESC LIMIT @limit OFFSET @offset`)
+      .all({ ...params, limit, offset: Math.max(0, f.offset) }) as InstallRow[];
+    return { items, total };
+  }
+
+  /** Count per status (dashboard). */
+  countByStatus(): Record<string, number> {
+    const rows = this.db
+      .prepare('SELECT status, COUNT(*) AS n FROM installs GROUP BY status')
+      .all() as Array<{ status: string; n: number }>;
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.status] = r.n;
+    return out;
+  }
 }
 
 /** Webhook log. The `payload_json` MUST already be redacted by the runtime. */
@@ -127,6 +163,53 @@ export class WebhookLogRepo {
       .prepare('SELECT event, installation_id, signature_ok, created_at FROM webhook_log ORDER BY id DESC LIMIT ?')
       .all(capped) as Array<{ event: string | null; installation_id: string | null; signature_ok: number; created_at: string }>;
   }
+
+  /** Paginated webhook log for one installation (newest first). Payloads masked by the caller. */
+  listByInstallation(
+    id: string,
+    f: { event?: string; signatureOk?: boolean; limit: number; offset: number },
+  ): { items: WebhookLogRow[]; total: number } {
+    const where = ['installation_id = @id'];
+    const params: Record<string, unknown> = { id };
+    if (f.event) {
+      where.push('event = @event');
+      params.event = f.event;
+    }
+    if (f.signatureOk !== undefined) {
+      where.push('signature_ok = @sig');
+      params.sig = f.signatureOk ? 1 : 0;
+    }
+    const clause = `WHERE ${where.join(' AND ')}`;
+    const total = (this.db.prepare(`SELECT COUNT(*) AS n FROM webhook_log ${clause}`).get(params) as { n: number }).n;
+    const limit = Math.max(1, Math.min(f.limit, 200));
+    const items = this.db
+      .prepare(`SELECT * FROM webhook_log ${clause} ORDER BY id DESC LIMIT @limit OFFSET @offset`)
+      .all({ ...params, limit, offset: Math.max(0, f.offset) }) as WebhookLogRow[];
+    return { items, total };
+  }
+
+  /** Dashboard counter: webhooks received in the last `hours`, and how many were refused. */
+  countSince(hours: number): { total: number; refused: number } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS total, SUM(CASE WHEN signature_ok = 0 THEN 1 ELSE 0 END) AS refused
+         FROM webhook_log WHERE created_at >= datetime('now', @cutoff)`,
+      )
+      .get({ cutoff: `-${hours} hours` }) as { total: number; refused: number | null };
+    return { total: row.total, refused: row.refused ?? 0 };
+  }
+
+  /** Last webhook event seen for an installation (lifecycle timeline). */
+  lastForInstallation(id: string): { event: string | null; created_at: string } | undefined {
+    return this.db
+      .prepare('SELECT event, created_at FROM webhook_log WHERE installation_id = ? ORDER BY id DESC LIMIT 1')
+      .get(id) as { event: string | null; created_at: string } | undefined;
+  }
+
+  /** Single webhook log row by id (installation scoping is enforced by the caller). */
+  findById(id: number): WebhookLogRow | undefined {
+    return this.db.prepare('SELECT * FROM webhook_log WHERE id = ?').get(id) as WebhookLogRow | undefined;
+  }
 }
 
 /** Replay protection for lifecycle webhooks (key derived from the signature). */
@@ -156,6 +239,15 @@ export class WebhookSeenRepo {
     return this.db
       .prepare(`DELETE FROM webhook_seen WHERE created_at < datetime('now', @cutoff)`)
       .run({ cutoff: `-${days} days` }).changes;
+  }
+
+  /** Count of retained signatures for an installation over the last `days` (idempotence view). */
+  countByInstallationSince(id: string, days: number): number {
+    return (
+      this.db
+        .prepare(`SELECT COUNT(*) AS n FROM webhook_seen WHERE installation_id = ? AND created_at >= datetime('now', ?)`)
+        .get(id, `-${days} days`) as { n: number }
+    ).n;
   }
 }
 
@@ -241,9 +333,27 @@ export class RunRepo {
   }
 
   recent(installationId: string, limit = 10): SyncRunRow[] {
+    const capped = Math.max(1, Math.min(limit, 200));
     return this.db
       .prepare('SELECT * FROM sync_run WHERE installation_id = ? ORDER BY id DESC LIMIT ?')
-      .all(installationId, limit) as SyncRunRow[];
+      .all(installationId, capped) as SyncRunRow[];
+  }
+
+  /** Paginated runs for an installation (newest first) + total. */
+  list(id: string, f: { limit: number; offset: number }): { items: SyncRunRow[]; total: number } {
+    const total = (this.db.prepare('SELECT COUNT(*) AS n FROM sync_run WHERE installation_id = ?').get(id) as { n: number }).n;
+    const limit = Math.max(1, Math.min(f.limit, 200));
+    const items = this.db
+      .prepare('SELECT * FROM sync_run WHERE installation_id = ? ORDER BY id DESC LIMIT ? OFFSET ?')
+      .all(id, limit, Math.max(0, f.offset)) as SyncRunRow[];
+    return { items, total };
+  }
+
+  /** Retention: deletes run rows older than `days` days. Returns rows removed. */
+  purgeOlderThan(days: number): number {
+    return this.db
+      .prepare(`DELETE FROM sync_run WHERE started_at < datetime('now', @cutoff)`)
+      .run({ cutoff: `-${days} days` }).changes;
   }
 }
 
@@ -288,6 +398,32 @@ export class IntegrationStateRepo {
     this.db
       .prepare('DELETE FROM integration_state WHERE installation_id = ? AND key = ?')
       .run(installationId, key);
+  }
+
+  /**
+   * Metadata for every state key of an installation — WITHOUT ever reading the value
+   * of an encrypted row. The `CASE` guarantees at the SQL level that a secret's value
+   * is never materialized: `value_preview` is NULL whenever `encrypted = 1`.
+   */
+  listMeta(
+    installationId: string,
+  ): Array<{ key: string; encrypted: 0 | 1; updated_at: string; value_length: number; value_preview: string | null }> {
+    return this.db
+      .prepare(
+        `SELECT key,
+                encrypted,
+                updated_at,
+                COALESCE(length(value), 0) AS value_length,
+                CASE WHEN encrypted = 0 THEN substr(value, 1, 200) ELSE NULL END AS value_preview
+         FROM integration_state WHERE installation_id = ? ORDER BY key`,
+      )
+      .all(installationId) as Array<{
+      key: string;
+      encrypted: 0 | 1;
+      updated_at: string;
+      value_length: number;
+      value_preview: string | null;
+    }>;
   }
 }
 
@@ -341,6 +477,16 @@ export class InboundEventRepo {
       .prepare(`DELETE FROM inbound_event WHERE received_at < datetime('now', @cutoff)`)
       .run({ cutoff: `-${days} days` }).changes;
   }
+
+  /** Paginated inbound events for an installation (newest first) + total. */
+  listByInstallation(id: string, f: { limit: number; offset: number }): { items: InboundEventRow[]; total: number } {
+    const total = (this.db.prepare('SELECT COUNT(*) AS n FROM inbound_event WHERE installation_id = ?').get(id) as { n: number }).n;
+    const limit = Math.max(1, Math.min(f.limit, 200));
+    const items = this.db
+      .prepare('SELECT * FROM inbound_event WHERE installation_id = ? ORDER BY id DESC LIMIT ? OFFSET ?')
+      .all(id, limit, Math.max(0, f.offset)) as InboundEventRow[];
+    return { items, total };
+  }
 }
 
 /**
@@ -389,6 +535,125 @@ export class RejectedItemRepo {
       .prepare(`DELETE FROM rejected_item WHERE created_at < datetime('now', @cutoff)`)
       .run({ cutoff: `-${days} days` }).changes;
   }
+
+  /** Filtered, paginated dead-letter view (across installations or scoped). Payloads masked by the caller. */
+  list(
+    f: { installationId?: string; entity?: string; sinceDays?: number; q?: string; limit: number; offset: number },
+  ): { items: RejectedItemRow[]; total: number } {
+    const { where, params } = rejectedFilter(f);
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const total = (this.db.prepare(`SELECT COUNT(*) AS n FROM rejected_item ${clause}`).get(params) as { n: number }).n;
+    const limit = Math.max(1, Math.min(f.limit, 500));
+    const items = this.db
+      .prepare(`SELECT * FROM rejected_item ${clause} ORDER BY id DESC LIMIT @limit OFFSET @offset`)
+      .all({ ...params, limit, offset: Math.max(0, f.offset) }) as RejectedItemRow[];
+    return { items, total };
+  }
+
+  count(f: { installationId?: string; entity?: string; sinceDays?: number }): number {
+    const { where, params } = rejectedFilter(f);
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return (this.db.prepare(`SELECT COUNT(*) AS n FROM rejected_item ${clause}`).get(params) as { n: number }).n;
+  }
+
+  /** Count grouped by entity (dashboard breakdown), optionally scoped to one installation. */
+  countByEntity(installationId?: string): Array<{ entity: string | null; n: number }> {
+    if (installationId) {
+      return this.db
+        .prepare('SELECT entity, COUNT(*) AS n FROM rejected_item WHERE installation_id = ? GROUP BY entity ORDER BY n DESC')
+        .all(installationId) as Array<{ entity: string | null; n: number }>;
+    }
+    return this.db
+      .prepare('SELECT entity, COUNT(*) AS n FROM rejected_item GROUP BY entity ORDER BY n DESC')
+      .all() as Array<{ entity: string | null; n: number }>;
+  }
+
+  /** Single rejected item by id (for an audited reveal of the raw, un-masked payload). */
+  findById(id: number): RejectedItemRow | undefined {
+    return this.db.prepare('SELECT * FROM rejected_item WHERE id = ?').get(id) as RejectedItemRow | undefined;
+  }
+
+  /** Deletes rejected items by id, SCOPED to the installation (never cross-tenant). Caps 500 ids. */
+  deleteByIds(installationId: string, ids: number[]): number {
+    const clean = ids.filter((n) => Number.isInteger(n)).slice(0, 500);
+    if (clean.length === 0) return 0;
+    const placeholders = clean.map(() => '?').join(',');
+    return this.db
+      .prepare(`DELETE FROM rejected_item WHERE installation_id = ? AND id IN (${placeholders})`)
+      .run(installationId, ...clean).changes;
+  }
+}
+
+/** Shared WHERE builder for the rejected-item filters (installation/entity/since/reason). */
+function rejectedFilter(f: {
+  installationId?: string;
+  entity?: string;
+  sinceDays?: number;
+  q?: string;
+}): { where: string[]; params: Record<string, unknown> } {
+  const where: string[] = [];
+  const params: Record<string, unknown> = {};
+  if (f.installationId) {
+    where.push('installation_id = @installationId');
+    params.installationId = f.installationId;
+  }
+  if (f.entity) {
+    where.push('entity = @entity');
+    params.entity = f.entity;
+  }
+  if (f.sinceDays) {
+    where.push(`created_at >= datetime('now', @since)`);
+    params.since = `-${f.sinceDays} days`;
+  }
+  if (f.q) {
+    where.push(`reason LIKE @q ESCAPE '\\'`);
+    params.q = `%${likeEscape(f.q)}%`;
+  }
+  return { where, params };
+}
+
+/** Append-only audit trail of admin actions. Metadata ONLY — no secrets, no raw PII. */
+export class AuditRepo {
+  constructor(private readonly db: DatabaseT.Database) {}
+
+  add(e: { action: string; installation_id?: string | null; target?: string | null; details?: unknown; ip?: string | null }): void {
+    let details: string | null = null;
+    if (e.details !== undefined) {
+      try {
+        details = JSON.stringify(e.details);
+      } catch {
+        details = null;
+      }
+    }
+    this.db
+      .prepare(
+        `INSERT INTO audit_log (action, installation_id, target, details_json, ip)
+         VALUES (@action, @installation_id, @target, @details_json, @ip)`,
+      )
+      .run({
+        action: e.action,
+        installation_id: nn(e.installation_id),
+        target: nn(e.target),
+        details_json: details,
+        ip: nn(e.ip),
+      });
+  }
+
+  list(f: { limit: number; offset: number }): { items: AuditRow[]; total: number } {
+    const total = (this.db.prepare('SELECT COUNT(*) AS n FROM audit_log').get() as { n: number }).n;
+    const limit = Math.max(1, Math.min(f.limit, 200));
+    const items = this.db
+      .prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?')
+      .all(limit, Math.max(0, f.offset)) as AuditRow[];
+    return { items, total };
+  }
+
+  /** Retention: deletes audit rows older than `days` days. Returns rows removed. */
+  purgeOlderThan(days: number): number {
+    return this.db
+      .prepare(`DELETE FROM audit_log WHERE at < datetime('now', @cutoff)`)
+      .run({ cutoff: `-${days} days` }).changes;
+  }
 }
 
 export interface Repositories {
@@ -400,6 +665,7 @@ export interface Repositories {
   state: IntegrationStateRepo;
   inboundEvents: InboundEventRepo;
   rejectedItems: RejectedItemRepo;
+  audit: AuditRepo;
 }
 
 export function createRepositories(db: DatabaseT.Database, cipher: SecretCipher): Repositories {
@@ -412,5 +678,6 @@ export function createRepositories(db: DatabaseT.Database, cipher: SecretCipher)
     state: new IntegrationStateRepo(db, cipher),
     inboundEvents: new InboundEventRepo(db),
     rejectedItems: new RejectedItemRepo(db),
+    audit: new AuditRepo(db),
   };
 }

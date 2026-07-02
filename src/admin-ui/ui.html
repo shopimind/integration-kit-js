@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ShopiMind — Console d'intégration</title>
+    <style nonce="__CSP_NONCE__">
+      :root {
+        --bg: #0f1216;
+        --panel: #171b21;
+        --panel-2: #1e242c;
+        --line: #2a323c;
+        --text: #e6eaef;
+        --muted: #94a1b2;
+        --brand: #5b8cff;
+        --ok: #37b679;
+        --warn: #e0a52b;
+        --err: #e5544b;
+        --radius: 10px;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f4f6f9;
+          --panel: #ffffff;
+          --panel-2: #f0f3f7;
+          --line: #dde3ea;
+          --text: #1a2029;
+          --muted: #5c6b7a;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      a { color: var(--brand); text-decoration: none; }
+      button {
+        font: inherit; cursor: pointer; border: 1px solid var(--line);
+        background: var(--panel-2); color: var(--text);
+        padding: 7px 12px; border-radius: 8px;
+      }
+      button:hover { border-color: var(--brand); }
+      button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+      button.ghost { background: transparent; }
+      button:disabled { opacity: .5; cursor: not-allowed; }
+      input, select {
+        font: inherit; color: var(--text); background: var(--panel);
+        border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+      }
+      code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+
+      /* Layout */
+      .app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+      .side { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 14px; }
+      .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; margin-bottom: 22px; }
+      .brand .dot { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--brand), #9b6bff); }
+      .nav { display: flex; flex-direction: column; gap: 3px; }
+      .nav a { padding: 9px 11px; border-radius: 8px; color: var(--muted); font-weight: 500; }
+      .nav a.active, .nav a:hover { background: var(--panel-2); color: var(--text); }
+      .side .foot { position: sticky; top: 100vh; margin-top: 24px; color: var(--muted); font-size: 12px; }
+      .main { padding: 22px 26px; max-width: 1200px; }
+      .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+      .head h1 { font-size: 20px; margin: 0; }
+      .sub { color: var(--muted); font-size: 13px; }
+
+      /* Cards */
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+      .card .k { color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
+      .card .v { font-size: 26px; font-weight: 700; margin-top: 6px; }
+      .card .v small { font-size: 13px; font-weight: 500; color: var(--muted); }
+
+      /* Table */
+      table { width: 100%; border-collapse: collapse; }
+      .tablewrap { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+      th { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+      tbody tr:last-child td { border-bottom: 0; }
+      tbody tr.click { cursor: pointer; }
+      tbody tr.click:hover { background: var(--panel-2); }
+
+      /* Bits */
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); }
+      .badge.active { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+      .badge.inactive { color: var(--muted); }
+      .badge.uninstalled { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent); }
+      .badge.ok { color: var(--ok); }
+      .badge.err { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent); }
+      .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .spacer { flex: 1; }
+      .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 18px 0 14px; flex-wrap: wrap; }
+      .tabs button { border: 0; background: transparent; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; }
+      .tabs button.active { color: var(--text); border-bottom-color: var(--brand); }
+      .empty { color: var(--muted); padding: 26px; text-align: center; }
+      .kv { display: grid; grid-template-columns: 190px 1fr; gap: 6px 14px; }
+      .kv .k { color: var(--muted); }
+      .paginator { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; color: var(--muted); }
+      pre.payload { margin: 0; white-space: pre-wrap; word-break: break-word; max-width: 520px; color: var(--muted); }
+
+      /* Login */
+      .login { display: grid; place-items: center; min-height: 100vh; }
+      .login .box { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 30px; width: 360px; max-width: 92vw; }
+      .login h1 { font-size: 18px; margin: 12px 0 4px; }
+      .login p { color: var(--muted); margin: 0 0 18px; font-size: 13px; }
+      .login form { display: flex; flex-direction: column; gap: 12px; }
+      .err-note { color: var(--err); font-size: 13px; min-height: 18px; }
+
+      /* Toast */
+      #toast { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+      .toast { background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--brand); padding: 10px 14px; border-radius: 8px; max-width: 340px; }
+      .toast.err { border-left-color: var(--err); }
+
+      @media (max-width: 760px) {
+        .app { grid-template-columns: 1fr; }
+        .side { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="toast"></div>
+
+    <script nonce="__CSP_NONCE__">
+      'use strict';
+
+      // ------------------------------------------------------------------ helpers
+      // DOM builder that ALWAYS inserts server data as text (never innerHTML), so a
+      // payload can never inject markup even though the API already masks PII.
+      function el(tag, props, children) {
+        const n = document.createElement(tag);
+        if (props) {
+          for (const k in props) {
+            if (k === 'class') n.className = props[k];
+            else if (k === 'text') n.textContent = props[k];
+            else if (k.slice(0, 2) === 'on' && typeof props[k] === 'function') n.addEventListener(k.slice(2), props[k]);
+            else if (props[k] != null) n.setAttribute(k, props[k]);
+          }
+        }
+        for (const c of [].concat(children || [])) {
+          if (c == null) continue;
+          n.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+        }
+        return n;
+      }
+      const $ = (sel, root) => (root || document).querySelector(sel);
+      const clear = (n) => { while (n.firstChild) n.removeChild(n.firstChild); return n; };
+      const fmtDate = (s) => (s ? String(s).replace('T', ' ').replace('Z', '') : '—');
+
+      function toast(msg, isErr) {
+        const t = el('div', { class: 'toast' + (isErr ? ' err' : ''), text: msg });
+        $('#toast').appendChild(t);
+        setTimeout(() => t.remove(), 4200);
+      }
+
+      // ------------------------------------------------------------------ state + api
+      const state = { csrf: null, view: 'dashboard', instId: null, tab: 'overview' };
+
+      async function api(path, opts) {
+        opts = opts || {};
+        const headers = Object.assign({}, opts.headers);
+        if (opts.body != null) headers['content-type'] = 'application/json';
+        if (state.csrf && opts.method && opts.method !== 'GET') headers['x-csrf-token'] = state.csrf;
+        const res = await fetch(path, {
+          method: opts.method || 'GET',
+          credentials: 'same-origin',
+          headers,
+          body: opts.body != null ? JSON.stringify(opts.body) : undefined,
+        });
+        if (res.status === 401) { state.csrf = null; renderLogin('Session expirée, reconnectez-vous.'); throw new Error('unauthorized'); }
+        const text = await res.text();
+        const json = text ? JSON.parse(text) : {};
+        if (!res.ok) throw new Error((json && json.error) || ('HTTP ' + res.status));
+        return json;
+      }
+
+      // ------------------------------------------------------------------ login
+      function renderLogin(note) {
+        const root = clear($('#root'));
+        const err = el('div', { class: 'err-note', text: note || '' });
+        const input = el('input', { type: 'password', placeholder: 'Jeton administrateur', autocomplete: 'current-password' });
+        const btn = el('button', { class: 'primary', type: 'submit', text: 'Se connecter' });
+        const form = el('form', {
+          onsubmit: async (e) => {
+            e.preventDefault();
+            btn.disabled = true; err.textContent = '';
+            try {
+              const r = await api('/admin/session', { method: 'POST', body: { token: input.value } });
+              state.csrf = r.csrf; input.value = '';
+              go('dashboard');
+            } catch (_) {
+              err.textContent = 'Jeton invalide.';
+            } finally { btn.disabled = false; }
+          },
+        }, [input, btn, err]);
+        root.appendChild(el('div', { class: 'login' }, [
+          el('div', { class: 'box' }, [
+            el('div', { class: 'brand' }, [el('span', { class: 'dot' }), el('span', { text: 'ShopiMind' })]),
+            el('h1', { text: 'Console d’intégration' }),
+            el('p', { text: 'Espace d’exploitation local de cette intégration. Aucune donnée ne quitte votre infrastructure.' }),
+            form,
+          ]),
+        ]));
+        input.focus();
+      }
+
+      // ------------------------------------------------------------------ shell
+      const NAV = [
+        { id: 'dashboard', label: 'Tableau de bord' },
+        { id: 'installations', label: 'Installations' },
+        { id: 'rejected', label: 'Rejets' },
+        { id: 'audit', label: 'Journal d’audit' },
+      ];
+
+      function shell(title, sub, body) {
+        const root = clear($('#root'));
+        const nav = el('nav', { class: 'nav' }, NAV.map((it) =>
+          el('a', {
+            href: '#' + it.id, class: state.view === it.id ? 'active' : '', text: it.label,
+            onclick: (e) => { e.preventDefault(); go(it.id); },
+          })));
+        const side = el('aside', { class: 'side' }, [
+          el('div', { class: 'brand' }, [el('span', { class: 'dot' }), el('span', { text: 'ShopiMind' })]),
+          nav,
+          el('div', { class: 'foot' }, [
+            el('div', { id: 'kitver', text: '' }),
+            el('a', { href: '#', text: 'Se déconnecter', onclick: async (e) => { e.preventDefault(); try { await api('/admin/session', { method: 'DELETE' }); } catch (_) {} state.csrf = null; renderLogin('Déconnecté.'); } }),
+          ]),
+        ]);
+        const main = el('main', { class: 'main' }, [
+          el('div', { class: 'head' }, [
+            el('div', {}, [el('h1', { text: title }), sub ? el('div', { class: 'sub', text: sub }) : null]),
+          ]),
+          body,
+        ]);
+        root.appendChild(el('div', { class: 'app' }, [side, main]));
+      }
+
+      function paginator(page, total, onGo) {
+        const pages = Math.max(1, Math.ceil(total / page.limit));
+        const cur = Math.floor(page.offset / page.limit) + 1;
+        return el('div', { class: 'paginator' }, [
+          el('span', { text: total + ' élément' + (total > 1 ? 's' : '') }),
+          el('button', { class: 'ghost', text: '‹', disabled: page.offset <= 0 ? '' : null, onclick: () => onGo(Math.max(0, page.offset - page.limit)) }),
+          el('span', { text: cur + ' / ' + pages }),
+          el('button', { class: 'ghost', text: '›', disabled: cur >= pages ? '' : null, onclick: () => onGo(page.offset + page.limit) }),
+        ]);
+      }
+
+      // ------------------------------------------------------------------ dashboard
+      async function renderDashboard() {
+        shell('Tableau de bord', 'Vue d’ensemble de l’intégration', el('div', { text: 'Chargement…', class: 'sub' }));
+        const m = await api('/admin/meta');
+        const setVer = $('#kitver'); if (setVer) setVer.textContent = 'kit v' + (m.kitVersion || '?');
+        const byStatus = m.installations.byStatus || {};
+        const cards = el('div', { class: 'grid' }, [
+          card('Installations', m.installations.total, Object.keys(byStatus).map((k) => k + ': ' + byStatus[k]).join('  ·  ')),
+          card('Webhooks (24 h)', m.webhooks24h.total, m.webhooks24h.refused + ' refusé(s)'),
+          card('Rejets (dead-letter)', m.rejected.total, (m.rejected.byEntity[0] ? 'top: ' + m.rejected.byEntity[0].entity : 'aucun')),
+        ]);
+        const byEntity = (m.rejected.byEntity || []);
+        const detail = byEntity.length
+          ? el('div', { class: 'tablewrap', style: 'margin-top:16px' }, [table(['Entité', 'Rejets'], byEntity.map((r) => [r.entity || '—', String(r.n)]))])
+          : null;
+        shell('Tableau de bord', 'Généré ' + fmtDate(m.generatedAt) + ' · kit v' + (m.kitVersion || '?'),
+          el('div', {}, [cards, detail]));
+      }
+      function card(k, v, sub) {
+        return el('div', { class: 'card' }, [
+          el('div', { class: 'k', text: k }),
+          el('div', { class: 'v' }, [String(v), sub ? el('small', { text: '  ' + sub }) : null]),
+        ]);
+      }
+      function table(cols, rows, rowClick) {
+        const thead = el('thead', {}, el('tr', {}, cols.map((c) => el('th', { text: c }))));
+        const tbody = el('tbody', {}, rows.length
+          ? rows.map((r, i) => el('tr', rowClick ? { class: 'click', onclick: () => rowClick(i) } : {},
+              r.map((cell) => (typeof cell === 'object' && cell !== null ? el('td', {}, [cell]) : el('td', { text: cell == null ? '—' : String(cell) })))))
+          : [el('tr', {}, el('td', { class: 'empty', colspan: String(cols.length), text: 'Aucun élément.' }))]);
+        return el('table', {}, [thead, tbody]);
+      }
+      function statusBadge(s) { return el('span', { class: 'badge ' + (s || 'inactive'), text: s || '—' }); }
+
+      // ------------------------------------------------------------------ installations
+      const instPage = { limit: 25, offset: 0, q: '', status: '' };
+      async function renderInstallations() {
+        const q = el('input', { placeholder: 'Rechercher (id, domaine, nom)…', value: instPage.q });
+        const sel = el('select', {}, [['', 'Tous les statuts'], ['active', 'active'], ['inactive', 'inactive'], ['uninstalled', 'uninstalled']].map(
+          (o) => el('option', { value: o[0], text: o[1], selected: instPage.status === o[0] ? '' : null })));
+        const apply = () => { instPage.q = q.value.trim(); instPage.status = sel.value; instPage.offset = 0; renderInstallations(); };
+        q.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
+        sel.addEventListener('change', apply);
+        const bar = el('div', { class: 'row', style: 'margin-bottom:14px' }, [q, sel, el('button', { text: 'Filtrer', onclick: apply })]);
+
+        shell('Installations', null, el('div', {}, [bar, el('div', { class: 'sub', text: 'Chargement…' })]));
+        const params = new URLSearchParams({ limit: String(instPage.limit), offset: String(instPage.offset) });
+        if (instPage.q) params.set('q', instPage.q);
+        if (instPage.status) params.set('status', instPage.status);
+        const res = await api('/admin/installations?' + params.toString());
+        const rows = res.items.map((it) => [
+          el('span', { class: 'mono', text: it.installation_id }),
+          it.shop_name || '—',
+          it.shop_domain || '—',
+          it.external_account_name || it.external_account_ref || '—',
+          statusBadge(it.status),
+          fmtDate(it.updated_at),
+        ]);
+        const tbl = el('div', { class: 'tablewrap' }, [
+          table(['ID installation', 'Boutique', 'Domaine', 'Compte intégrateur', 'Statut', 'Mise à jour'], rows,
+            (i) => go('installation', res.items[i].installation_id)),
+        ]);
+        shell('Installations', res.total + ' installation(s)', el('div', {}, [
+          bar, tbl, paginator(instPage, res.total, (off) => { instPage.offset = off; renderInstallations(); }),
+        ]));
+      }
+
+      // ------------------------------------------------------------------ installation detail
+      const TABS = [
+        { id: 'overview', label: 'Aperçu' },
+        { id: 'runs', label: 'Synchros' },
+        { id: 'webhooks', label: 'Webhooks' },
+        { id: 'inbound', label: 'Entrants' },
+        { id: 'state', label: 'État' },
+        { id: 'rejected', label: 'Rejets' },
+      ];
+      async function renderInstallation(id) {
+        const d = await api('/admin/installations/' + encodeURIComponent(id));
+        const inst = d.install;
+        const back = el('button', { class: 'ghost', text: '‹ Installations', onclick: () => go('installations') });
+        const header = el('div', { class: 'card', style: 'margin-bottom:6px' }, [
+          el('div', { class: 'row' }, [el('span', { class: 'mono', text: inst.installation_id }), statusBadge(inst.status), el('span', { class: 'spacer' })]),
+          el('div', { class: 'kv', style: 'margin-top:12px' }, [
+            el('div', { class: 'k', text: 'Boutique' }), el('div', { text: (inst.shop_name || '—') + (inst.shop_domain ? ' · ' + inst.shop_domain : '') }),
+            el('div', { class: 'k', text: 'Compte intégrateur' }), el('div', { text: inst.external_account_name || inst.external_account_ref || '—' }),
+            el('div', { class: 'k', text: 'Installée / activée' }), el('div', { text: fmtDate(inst.installed_at) + ' / ' + fmtDate(inst.activated_at) }),
+            el('div', { class: 'k', text: 'Rejets / signatures (7 j)' }), el('div', { text: d.rejectedCount + ' / ' + d.seenSignatures7d }),
+          ]),
+        ]);
+        const tabsBar = el('div', { class: 'tabs' }, TABS.map((t) =>
+          el('button', { class: state.tab === t.id ? 'active' : '', text: t.label, onclick: () => { state.tab = t.id; renderInstallation(id); } })));
+        const panel = el('div', { class: 'sub', text: 'Chargement…' });
+        const actions = el('div', { class: 'row', style: 'margin:12px 0' }, [
+          el('button', { class: 'primary', text: 'Synchroniser', onclick: () => doAction('/admin/sync/' + enc(id), 'Synchro incrémentale lancée', () => renderInstallation(id)) }),
+          el('button', { text: 'Backfill complet', onclick: () => doAction('/admin/sync/' + enc(id) + '?full=true', 'Backfill complet lancé', () => renderInstallation(id)) }),
+          el('button', { text: 'Reprovisionner', onclick: () => doAction('/admin/installations/' + enc(id) + '/reprovision', 'Provisioning relancé', () => renderInstallation(id)) }),
+        ]);
+
+        shell('Installation', inst.shop_name || inst.installation_id, el('div', {}, [back, header, actions, tabsBar, panel]));
+        renderInstallTab(id, d, panel);
+      }
+
+      async function renderInstallTab(id, d, panel) {
+        try {
+          if (state.tab === 'overview') return fillOverview(d, panel);
+          if (state.tab === 'runs') return fillPaged('/admin/installations/' + enc(id) + '/runs', panel,
+            ['Run', 'Statut', 'Démarré', 'Terminé', 'Résumé'], (r) => [r.id, badge(r.status), fmtDate(r.started_at), fmtDate(r.finished_at), summarize(r.summary_json)]);
+          if (state.tab === 'webhooks') return fillPaged('/admin/installations/' + enc(id) + '/webhooks', panel,
+            ['Événement', 'Signature', 'Reçu', 'Charge utile (masquée)'], (r) => [r.event, r.signature_ok ? badge('ok', 'ok') : badge('refusée', 'err'), fmtDate(r.created_at), revealCell('/admin/installations/' + enc(id) + '/webhook-log/' + r.id + '/reveal', r.payload_json)]);
+          if (state.tab === 'inbound') return fillPaged('/admin/installations/' + enc(id) + '/inbound', panel,
+            ['Action', 'Statut', 'Reçu', 'Traité', 'Erreur'], (r) => [r.action, badge(r.status), fmtDate(r.received_at), fmtDate(r.processed_at), r.error]);
+          if (state.tab === 'state') return fillState('/admin/installations/' + enc(id) + '/state', panel);
+          if (state.tab === 'rejected') return fillPaged('/admin/rejected?installationId=' + enc(id), panel,
+            ['Entité', 'Raison', 'Créé', 'Charge utile (masquée)', 'Action'],
+            (r) => [r.entity, r.reason, fmtDate(r.created_at),
+              revealCell('/admin/rejected/' + r.id + '/reveal', r.payload_json),
+              purgeBtn(r.installation_id, r.id, () => renderInstallation(id))]);
+        } catch (e) { clear(panel).appendChild(el('div', { class: 'empty', text: 'Erreur : ' + e.message })); }
+      }
+      const enc = encodeURIComponent;
+      function badge(txt, cls) { return el('span', { class: 'badge ' + (cls || ''), text: txt || '—' }); }
+      function summarize(j) { try { const s = JSON.parse(j); return (s.mode || '') + ' · ' + (s.status || '') + (s.errors && s.errors.length ? ' · ' + s.errors.length + ' err' : ''); } catch (_) { return '—'; } }
+
+      // POST action helper (CSRF header attached by api()).
+      async function doAction(path, okMsg, after) {
+        try { await api(path, { method: 'POST', body: {} }); toast(okMsg); if (after) after(); }
+        catch (e) { if (e.message !== 'unauthorized') toast('Échec : ' + e.message, true); }
+      }
+      // Masked payload cell + an audited "reveal" button that swaps in the raw value.
+      function revealCell(path, masked) {
+        const pre = el('pre', { class: 'payload mono', text: masked || '—' });
+        const btn = el('button', { class: 'ghost', text: 'Révéler', style: 'margin-top:6px' });
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try { const r = await api(path, { method: 'POST', body: {} }); pre.textContent = r.payload_json || '(vide)'; btn.textContent = 'Révélé (audité)'; }
+          catch (e) { btn.disabled = false; if (e.message !== 'unauthorized') toast('Échec : ' + e.message, true); }
+        });
+        return el('div', {}, [pre, el('div', {}, [btn])]);
+      }
+      // Scoped delete of one dead-lettered item (with confirmation).
+      function purgeBtn(installationId, id, after) {
+        const b = el('button', { class: 'ghost', text: 'Supprimer' });
+        b.addEventListener('click', async () => {
+          if (!window.confirm('Supprimer définitivement ce rejet ?')) return;
+          b.disabled = true;
+          try { await api('/admin/rejected/purge', { method: 'POST', body: { installationId, ids: [id] } }); toast('Rejet supprimé'); if (after) after(); }
+          catch (e) { b.disabled = false; if (e.message !== 'unauthorized') toast('Échec : ' + e.message, true); }
+        });
+        return b;
+      }
+
+      function fillOverview(d, panel) {
+        clear(panel);
+        const cursors = (d.cursors || []).map((c) => [c.entity, c.source_key || '(global)', c.last_status || '—', fmtDate(c.last_synced_at), String(c.items), String(c.consecutive_failures)]);
+        const runs = (d.recentRuns || []).map((r) => [r.id, r.status, fmtDate(r.started_at), summarize(r.summary_json)]);
+        panel.appendChild(el('div', { class: 'row', style: 'align-items:flex-start; gap:16px' }, [
+          el('div', { style: 'flex:1; min-width:320px' }, [
+            el('div', { class: 'sub', style: 'margin-bottom:6px', text: 'Curseurs' }),
+            el('div', { class: 'tablewrap' }, [table(['Entité', 'Source', 'Statut', 'Dernière synchro', 'Items', 'Échecs'], cursors)]),
+          ]),
+          el('div', { style: 'flex:1; min-width:300px' }, [
+            el('div', { class: 'sub', style: 'margin-bottom:6px', text: 'Dernier webhook : ' + (d.lastWebhook ? d.lastWebhook.event + ' (' + fmtDate(d.lastWebhook.created_at) + ')' : '—') }),
+            el('div', { class: 'tablewrap' }, [table(['Run', 'Statut', 'Démarré', 'Résumé'], runs)]),
+          ]),
+        ]));
+      }
+
+      async function fillState(path, panel) {
+        clear(panel).appendChild(el('div', { class: 'sub', text: 'Chargement…' }));
+        const res = await api(path);
+        const rows = res.items.map((s) => [
+          el('span', { class: 'mono', text: s.key }),
+          s.encrypted ? badge('chiffré', 'err') : badge('clair'),
+          String(s.value_length),
+          s.encrypted ? el('span', { class: 'sub', text: '•••••• (secret jamais exposé)' }) : el('span', { class: 'mono', text: s.value_preview == null ? '—' : s.value_preview }),
+          fmtDate(s.updated_at),
+        ]);
+        clear(panel).appendChild(el('div', { class: 'tablewrap' }, [table(['Clé', 'Type', 'Longueur', 'Aperçu', 'Mise à jour'], rows)]));
+      }
+
+      async function fillPaged(basePath, panel, cols, mapRow) {
+        const pg = { limit: 25, offset: 0 };
+        async function load() {
+          clear(panel).appendChild(el('div', { class: 'sub', text: 'Chargement…' }));
+          const sep = basePath.indexOf('?') >= 0 ? '&' : '?';
+          const res = await api(basePath + sep + 'limit=' + pg.limit + '&offset=' + pg.offset);
+          const rows = res.items.map(mapRow);
+          clear(panel).appendChild(el('div', {}, [
+            el('div', { class: 'tablewrap' }, [table(cols, rows)]),
+            paginator(pg, res.total, (off) => { pg.offset = off; load(); }),
+          ]));
+        }
+        return load();
+      }
+
+      // ------------------------------------------------------------------ global rejected
+      const rejPage = { limit: 25, offset: 0, entity: '' };
+      async function renderRejected() {
+        const ent = el('input', { placeholder: 'Filtrer par entité…', value: rejPage.entity });
+        const apply = () => { rejPage.entity = ent.value.trim(); rejPage.offset = 0; renderRejected(); };
+        ent.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
+        const bar = el('div', { class: 'row', style: 'margin-bottom:14px' }, [ent, el('button', { text: 'Filtrer', onclick: apply })]);
+        shell('Rejets (dead-letter)', 'Éléments refusés par l’API ShopiMind lors d’un push', el('div', {}, [bar, el('div', { class: 'sub', text: 'Chargement…' })]));
+        const params = new URLSearchParams({ limit: String(rejPage.limit), offset: String(rejPage.offset) });
+        if (rejPage.entity) params.set('entity', rejPage.entity);
+        const res = await api('/admin/rejected?' + params.toString());
+        const rows = res.items.map((r) => [
+          el('span', { class: 'mono', text: r.installation_id }), r.entity, r.reason, fmtDate(r.created_at),
+          revealCell('/admin/rejected/' + r.id + '/reveal', r.payload_json),
+          purgeBtn(r.installation_id, r.id, renderRejected),
+        ]);
+        shell('Rejets (dead-letter)', res.total + ' rejet(s)', el('div', {}, [
+          bar, el('div', { class: 'tablewrap' }, [table(['Installation', 'Entité', 'Raison', 'Créé', 'Charge utile (masquée)', 'Action'], rows)]),
+          paginator(rejPage, res.total, (off) => { rejPage.offset = off; renderRejected(); }),
+        ]));
+      }
+
+      // ------------------------------------------------------------------ audit
+      const auditPage = { limit: 40, offset: 0 };
+      async function renderAudit() {
+        shell('Journal d’audit', 'Actions d’administration (métadonnées uniquement)', el('div', { class: 'sub', text: 'Chargement…' }));
+        const res = await api('/admin/audit?limit=' + auditPage.limit + '&offset=' + auditPage.offset);
+        const rows = res.items.map((a) => [fmtDate(a.at), a.action, a.installation_id, a.target, a.details_json, a.ip]);
+        shell('Journal d’audit', res.total + ' entrée(s)', el('div', {}, [
+          el('div', { class: 'tablewrap' }, [table(['Date', 'Action', 'Installation', 'Cible', 'Détails', 'IP'], rows)]),
+          paginator(auditPage, res.total, (off) => { auditPage.offset = off; renderAudit(); }),
+        ]));
+      }
+
+      // ------------------------------------------------------------------ router
+      function go(view, id) {
+        state.view = view === 'installation' ? 'installations' : view;
+        if (view === 'installation') { state.instId = id; state.tab = 'overview'; }
+        const run = {
+          dashboard: renderDashboard, installations: renderInstallations,
+          installation: () => renderInstallation(id), rejected: renderRejected, audit: renderAudit,
+        }[view] || renderDashboard;
+        Promise.resolve().then(run).catch((e) => { if (e.message !== 'unauthorized') toast('Erreur : ' + e.message, true); });
+      }
+
+      // Cold start: try the dashboard; a 401 bounces to the login screen.
+      renderDashboard().catch((e) => { if (e.message === 'unauthorized') return; renderLogin(); });
+    </script>
+  </body>
+</html>

@@ -21,6 +21,9 @@ export function createServer(opts: ServerOptions): Server {
       // request validation is non-authoritative here -- making it blocking would risk
       // rejecting otherwise-valid signed requests. We log validation findings instead.
       validate: { failAction: 'log' },
+      // The admin session reads the raw `Cookie` header itself; disable Hapi's built-in
+      // cookie state parsing so a malformed or unrelated cookie can never 400 a request.
+      state: { parse: false, failAction: 'ignore' },
     },
   });
 }

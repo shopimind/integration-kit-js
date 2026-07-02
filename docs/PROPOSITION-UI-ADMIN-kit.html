@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROPOSITION — UI Admin du kit d'intégration ShopiMind (à valider)</title>
+<style>
+  /* ============ document (spec) ============ */
+  :root{
+    --ink:#1c2430; --ink-soft:#5b6675; --paper:#f6f7f9; --card:#ffffff; --line:#e3e7ec;
+    --accent:#94c840; --accent-ink:#3d5c00; --warn:#c47f17; --err:#c0392b; --ok:#2e8b57;
+    --mono:ui-monospace,'Cascadia Code','JetBrains Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.6 -apple-system,'Segoe UI',Roboto,Inter,sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 90px}
+  h1{font-size:26px;line-height:1.25;margin:.2em 0}
+  h2{font-size:20px;margin:2.2em 0 .6em;padding-top:.6em;border-top:2px solid var(--line)}
+  h3{font-size:16px;margin:1.6em 0 .4em}
+  h4{font-size:14px;margin:1.2em 0 .3em}
+  p{margin:.5em 0}
+  code,.mono{font-family:var(--mono);font-size:.86em;background:#eef1f4;border-radius:4px;padding:1px 5px}
+  pre{background:#151a21;color:#dbe3ec;border-radius:8px;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55}
+  pre code{background:none;color:inherit;padding:0}
+  table{border-collapse:collapse;width:100%;margin:.7em 0;background:var(--card);font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#eef1f4;font-weight:600}
+  .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;border-radius:20px;padding:2px 10px;vertical-align:middle}
+  .tag.exist{background:#e3f2d9;color:var(--accent-ink)}
+  .tag.new{background:#fdeeda;color:#8a5a00}
+  .tag.sec{background:#fde3e0;color:#8c2318}
+  .tag.v2{background:#e5e9f8;color:#39498f}
+  .callout{border-left:4px solid var(--accent);background:#f0f7e6;border-radius:0 8px 8px 0;padding:10px 14px;margin:.9em 0}
+  .callout.warn{border-color:var(--warn);background:#fdf3e3}
+  .callout.err{border-color:var(--err);background:#fdecea}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 20px;column-count:2;column-gap:36px;font-size:14px}
+  .toc a{color:var(--accent-ink);text-decoration:none}
+  .meta{color:var(--ink-soft);font-size:13px}
+  .statut{display:inline-block;background:#fdeeda;color:#8a5a00;font-weight:700;border-radius:8px;padding:4px 12px;margin:6px 0}
+  .kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;background:#fff;padding:0 6px;font-family:var(--mono);font-size:.85em}
+  .small{font-size:12.5px;color:var(--ink-soft)}
+
+  /* ============ maquette (app) ============ */
+  .app{--a-bg:#0f141b; --a-panel:#161d27; --a-panel2:#1b2431; --a-line:#26303e; --a-ink:#dbe3ec; --a-soft:#8a97a8;
+       --a-green:#94c840; --a-green-ink:#0f141b; --a-amber:#e0a53f; --a-red:#e06555; --a-blue:#5aa2e0;
+       border:1px solid #2a3441;border-radius:14px;overflow:hidden;margin:14px 0 6px;
+       background:var(--a-bg);color:var(--a-ink);font-size:13px;box-shadow:0 12px 34px rgba(10,16,24,.35)}
+  .app.light{--a-bg:#f4f6f8; --a-panel:#ffffff; --a-panel2:#eef1f5; --a-line:#dde3ea; --a-ink:#1d2733; --a-soft:#647184;
+       --a-green:#6da01c; --a-green-ink:#ffffff; border-color:#cfd7e0}
+  .app *{box-sizing:border-box}
+  .a-top{display:flex;align-items:center;gap:14px;background:var(--a-panel);border-bottom:1px solid var(--a-line);padding:9px 14px}
+  .a-brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;white-space:nowrap}
+  .a-dot{width:10px;height:10px;border-radius:50%;background:var(--a-green);box-shadow:0 0 8px var(--a-green)}
+  .a-brand small{color:var(--a-soft);font-weight:500}
+  .a-search{flex:1;max-width:330px;background:var(--a-panel2);border:1px solid var(--a-line);border-radius:8px;color:var(--a-soft);padding:6px 12px}
+  .a-top .sp{flex:1}
+  .a-chip{background:var(--a-panel2);border:1px solid var(--a-line);border-radius:20px;padding:4px 11px;color:var(--a-soft);font-size:12px;cursor:pointer;user-select:none}
+  .a-chip.on{color:var(--a-ink);border-color:var(--a-green)}
+  .a-body{display:flex;min-height:540px}
+  .a-nav{width:198px;background:var(--a-panel);border-right:1px solid var(--a-line);padding:12px 8px;display:flex;flex-direction:column;gap:2px}
+  .a-nav a{display:flex;justify-content:space-between;align-items:center;color:var(--a-soft);text-decoration:none;border-radius:8px;padding:8px 12px;font-weight:500;cursor:pointer}
+  .a-nav a.on{background:var(--a-panel2);color:var(--a-ink);box-shadow:inset 3px 0 0 var(--a-green)}
+  .a-nav .cnt{background:var(--a-red);color:#fff;font-size:10.5px;font-weight:800;border-radius:12px;padding:1px 7px}
+  .a-nav .sect{color:var(--a-soft);font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;margin:14px 12px 4px}
+  .a-main{flex:1;padding:16px 18px;overflow-x:auto}
+  .a-h1{font-size:16px;font-weight:700;margin:2px 0 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .a-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .a-card{background:var(--a-panel);border:1px solid var(--a-line);border-radius:10px;padding:11px 13px}
+  .a-card .k{color:var(--a-soft);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+  .a-card .v{font-size:21px;font-weight:800;margin-top:3px}
+  .a-card .s{font-size:11.5px;color:var(--a-soft);margin-top:2px}
+  .a-card.ok .v{color:var(--a-green)} .a-card.warn .v{color:var(--a-amber)} .a-card.err .v{color:var(--a-red)}
+  .a-tbl{width:100%;border-collapse:collapse;background:var(--a-panel);border:1px solid var(--a-line);border-radius:10px;overflow:hidden;font-size:12.5px}
+  .a-tbl th{background:var(--a-panel2);color:var(--a-soft);font-weight:600;text-align:left;padding:8px 11px;border-bottom:1px solid var(--a-line);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .a-tbl td{padding:8px 11px;border-bottom:1px solid var(--a-line)}
+  .a-tbl tr:last-child td{border-bottom:0}
+  .a-tbl tr.click{cursor:pointer} .a-tbl tr.click:hover td{background:var(--a-panel2)}
+  .pill{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.03em;border-radius:14px;padding:2px 9px}
+  .pill.ok{background:rgba(148,200,64,.16);color:var(--a-green)}
+  .pill.err{background:rgba(224,101,85,.16);color:var(--a-red)}
+  .pill.warn{background:rgba(224,165,63,.16);color:var(--a-amber)}
+  .pill.mut{background:var(--a-panel2);color:var(--a-soft)}
+  .pill.blue{background:rgba(90,162,224,.16);color:var(--a-blue)}
+  .m{font-family:var(--mono);font-size:11.5px}
+  .a-soft{color:var(--a-soft)}
+  .a-btn{display:inline-block;background:var(--a-green);color:var(--a-green-ink);border:0;border-radius:8px;font-weight:700;font-size:12px;padding:7px 13px;cursor:pointer}
+  .a-btn.ghost{background:transparent;color:var(--a-ink);border:1px solid var(--a-line)}
+  .a-btn.danger{background:var(--a-red);color:#fff}
+  .a-btn[disabled]{opacity:.45;cursor:not-allowed}
+  .a-tabs{display:flex;gap:2px;border-bottom:1px solid var(--a-line);margin:10px 0 12px;flex-wrap:wrap}
+  .a-tabs span{padding:7px 12px;color:var(--a-soft);cursor:pointer;border-radius:8px 8px 0 0;font-weight:600;font-size:12px}
+  .a-tabs span.on{color:var(--a-ink);background:var(--a-panel);border:1px solid var(--a-line);border-bottom-color:var(--a-panel)}
+  .a-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:900px){.a-grid2{grid-template-columns:1fr}.a-nav{display:none}}
+  .a-kv{background:var(--a-panel);border:1px solid var(--a-line);border-radius:10px;padding:4px 0}
+  .a-kv div{display:flex;justify-content:space-between;gap:14px;padding:6px 13px;border-bottom:1px solid var(--a-line)}
+  .a-kv div:last-child{border-bottom:0}
+  .a-kv b{font-weight:600;color:var(--a-soft);font-size:12px}
+  .a-modal{background:var(--a-panel);border:1px solid var(--a-line);border-radius:12px;max-width:430px;margin:12px auto;padding:16px 18px;box-shadow:0 18px 44px rgba(0,0,0,.45)}
+  .a-modal h5{margin:0 0 6px;font-size:14px}
+  .a-modal p{color:var(--a-soft);font-size:12.5px;margin:.35em 0}
+  .a-modal .row{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+  .a-empty{border:1px dashed var(--a-line);border-radius:10px;color:var(--a-soft);text-align:center;padding:26px 12px;font-size:12.5px;background:var(--a-panel)}
+  .a-alert{border:1px solid rgba(224,101,85,.4);background:rgba(224,101,85,.08);color:var(--a-red);border-radius:10px;padding:10px 13px;font-size:12.5px}
+  .skl{height:11px;border-radius:6px;background:linear-gradient(90deg,var(--a-panel2) 25%,var(--a-line) 40%,var(--a-panel2) 60%);background-size:300% 100%;animation:skl 1.2s infinite}
+  @keyframes skl{0%{background-position:100% 0}100%{background-position:0 0}}
+  .a-login{max-width:360px;margin:60px auto;background:var(--a-panel);border:1px solid var(--a-line);border-radius:14px;padding:26px 26px 22px}
+  .a-login input{width:100%;background:var(--a-panel2);border:1px solid var(--a-line);color:var(--a-ink);border-radius:8px;padding:9px 12px;margin:6px 0 12px;font-family:var(--mono);font-size:12.5px}
+  .a-screen{display:none}.a-screen.on{display:block}
+  .maq-note{font-size:12px;color:var(--ink-soft);margin:4px 2px 18px}
+  .payload{background:var(--a-panel2);border:1px solid var(--a-line);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:11.5px;line-height:1.6;overflow-x:auto;white-space:pre}
+  .redct{background:rgba(224,165,63,.2);color:var(--a-amber);border-radius:4px;padding:0 4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="meta">ShopiMind · <code>@shopimind/integration-kit-js</code> (état inventorié : <b>v1.4.0 publiée</b>) · 2026-07-02</p>
+<h1>UI Admin embarquée du kit d'intégration — maquette &amp; spécification</h1>
+<div class="statut">PROPOSITION — aucune implémentation avant validation humaine</div>
+<p>Objectif : une <b>console d'exploitation locale</b>, embarquée dans le kit et héritée par toutes les intégrations, qui permet à l'<b>intégrateur tiers</b> (aucun accès aux dashboards internes ShopiMind) de <b>diagnostiquer et opérer</b> son instance sans jamais ouvrir le SQLite : santé, installations, provisioning, curseurs, runs, webhooks, idempotence, dead-letter des rejets — et les actions associées, sécurisées et auditées.</p>
+<div class="callout"><b>Frontière assumée : 100 % côté intégrateur.</b> Cette UI appartient au kit, donc à l'intégration : elle tourne dans <b>son</b> runtime, lit <b>uniquement</b> le store SQLite local de l'instance, ne fait <b>aucun appel</b> aux services ShopiMind et n'exige aucun compte ShopiMind. La supervision côté ShopiMind (agrégée multi-boutiques, sur la base core) est un monde séparé : ici, aucun identifiant interne ShopiMind — uniquement les <code>installation_id</code> opaques déjà présents dans le store.</p></div>
+
+<div class="toc">
+  <b>Sommaire</b><br>
+  <a href="#s0">0. Résumé exécutif — mes arbitrages</a><br>
+  <a href="#s1">1. Inventaire du RÉEL (v1.4.0)</a><br>
+  <a href="#s2">2. Maquette interactive</a><br>
+  <a href="#s3">3. Mapping exhaustif écran → store</a><br>
+  <a href="#s4">4. Actions &amp; garde-fous</a><br>
+  <a href="#s5">5. Modèle de sécurité</a><br>
+  <a href="#s6">6. Architecture technique &amp; API</a><br>
+  <a href="#s7">7. Changements kit nécessaires</a><br>
+  <a href="#s8">8. Plan d'implémentation &amp; tests</a><br>
+  <a href="#s9">9. Questions ouvertes à trancher</a>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s0">0. Résumé exécutif — mes arbitrages (le « patron » du kit)</h2>
+<ol>
+  <li><b>Correction du brief :</b> le runtime du kit est <b>Hapi</b> (<code>@hapi/hapi</code>), pas Fastify. Tout le reste de l'inventaire du brief correspond bien à la v1.4.0 (tables jusqu'à <code>rejected_item</code>, endpoints <code>/admin/overview</code> &amp; co — livrés par le LOT E).</li>
+  <li><b>UI = un client de l'API JSON, jamais du SQL.</b> L'UI (une seule page autoportante servie sur <code>GET /admin/ui</code>) consomme exclusivement <code>/admin/*</code>. La surface testée et sécurisée est l'API ; l'UI n'a aucun privilège propre. Tout ce que l'UI montre est scriptable en <code>curl</code>.</li>
+  <li><b>Session navigateur digne de ce nom :</b> page de connexion → le jeton admin est échangé contre un <b>cookie de session HttpOnly + SameSite=Strict</b> (TTL 12 h glissant, invalidé au redémarrage). Le jeton ne vit jamais dans l'URL ni le localStorage. CSRF sur toutes les mutations. L'auth existante par en-tête (<code>x-admin-token</code>/Bearer) reste valable pour les scripts — rétrocompatibilité totale.</li>
+  <li><b>PII masquée par défaut, révélation auditée.</b> Les payloads (<code>rejected_item</code>, <code>webhook_log</code>) sont servis masqués (emails, téléphones, adresses). « Révéler » est un POST par item, confirmé, journalisé dans un nouvel <code>audit_log</code>.</li>
+  <li><b>Secrets : présence seulement.</b> L'écran État affiche <code>clé · chiffré ✓ · date</code>. La valeur d'une ligne <code>encrypted=1</code> ne quitte <b>jamais</b> le serveur (l'endpoint ne la lit même pas).</li>
+  <li><b>« Rejouer un rejet » — sémantique honnête.</b> Re-pousser tel quel un payload stocké est un piège (donnée périmée ; la source de vérité est le système partenaire). V1 : <b>Purger</b> (item ou filtre) + <b>« Re-synchroniser l'entité »</b> (relance la fenêtre couvrante via le moteur — le bon geste après correction de la cause). V2 optionnelle : hook <code>replayRejected(ctx, item)</code> déclaré par l'intégration, pour un vrai rejeu item par item quand l'intégration sait le faire.</li>
+  <li><b>Exposition isolable :</b> nouvelle option <code>adminPort</code>/<code>adminHost</code> → un <b>second listener Hapi dédié</b> à <code>/admin/*</code> + UI, bindable sur un réseau interne, séparé de l'ingress public des <code>/webhook</code>. Par défaut (option absente) : même port qu'aujourd'hui (compat), avec guidance ferme de firewalling.</li>
+  <li><b>Zéro dépendance :</b> UI vanilla (HTML/CSS/JS inline, ~70–90 kB), CSP stricte par nonce, aucun CDN, aucune lib front. Embarquée dans <code>dist/</code> via un script de génération (même philosophie que les migrations SQL embarquées).</li>
+  <li><b>Ajouts au-delà du brief</b> (mon initiative) : écran <b>Audit</b> (le journal des actions est lisible dans l'UI elle-même) ; badge <b>backoff</b> sur les curseurs (la colonne <code>consecutive_failures</code> E3 existe, montrons-la) ; <b>mode full/incrémental</b> ajouté au résumé de run (aujourd'hui non tracé) ; compteur de rejets <b>dans la nav</b> (la vue phare doit crier).</li>
+</ol>
+
+<!-- ================================================================ -->
+<h2 id="s1">1. Inventaire du RÉEL — kit v1.4.0 (lu dans le code, pas deviné)</h2>
+
+<h3>1.1 Store SQLite — 9 tables (migrations v1→v6 + table du runner)</h3>
+<table>
+  <tr><th>Table</th><th>Colonnes exactes</th><th>Rôle</th></tr>
+  <tr><td><code>schema_migrations</code></td><td class="small">version, name, applied_at</td><td>Runner de migrations (append-only).</td></tr>
+  <tr><td><code>installs</code></td><td class="small">installation_id <b>PK</b>, shop_domain, shop_name, external_account_ref, external_account_name, status ('inactive'|'active'|'uninstalled'), installed_at, activated_at, deactivated_at, uninstalled_at, created_at, updated_at</td><td>Registre de corrélation (1 ligne / installation).</td></tr>
+  <tr><td><code>webhook_log</code></td><td class="small">id, event, installation_id, signature_ok (0/1), payload_json <b>(déjà expurgé à l'écriture)</b>, created_at</td><td>Journal des webhooks lifecycle reçus.</td></tr>
+  <tr><td><code>integration_state</code></td><td class="small">(installation_id, key) <b>PK</b>, value, encrypted (0/1), updated_at</td><td>KV par installation. <code>setSecret</code> → AES-256-GCM + AAD <code>installId:key</code>. Clés réservées : <code>__access_token</code> (chiffrée), <code>__inbound_secret</code> (chiffrée), <code>__provisioning</code> (JSON clair {sourceIds, defIds}).</td></tr>
+  <tr><td><code>sync_run</code></td><td class="small">id, installation_id, status ('running'|'ok'|'partial'|'failed'), summary_json, started_at, finished_at</td><td>Historique des runs. <b>Gap :</b> le mode full/incrémental n'est pas tracé.</td></tr>
+  <tr><td><code>sync_cursor</code></td><td class="small">(installation_id, entity, source_key) <b>PK</b>, last_synced_at, last_status, last_error, items, <b>consecutive_failures</b> (E3), updated_at</td><td>Curseur sûr par entité/source + compteur d'échecs consécutifs (backoff exponentiel).</td></tr>
+  <tr><td><code>inbound_event</code></td><td class="small">id, installation_id, idempotency_key <b>(unique/install)</b>, action, status ('received'|'done'|'failed'), error, received_at, processed_at</td><td>Idempotence + journal du middleware entrant.</td></tr>
+  <tr><td><code>webhook_seen</code></td><td class="small">(installation_id, dedup_key) <b>PK</b>, created_at</td><td>Anti-rejeu des webhooks lifecycle (clé dérivée de la signature).</td></tr>
+  <tr><td><code>rejected_item</code> <span class="tag exist">E4</span></td><td class="small">id, installation_id, run_id, entity, source_key, payload_json, reason, created_at</td><td>Dead-letter des rejets par item (plafonné à 500/run ; purgé par la rétention).</td></tr>
+</table>
+
+<h3>1.2 Endpoints existants (Hapi, <code>src/http/routes.ts</code>)</h3>
+<table>
+  <tr><th>Endpoint</th><th>Auth</th><th>Retour</th></tr>
+  <tr><td><code>GET /health</code></td><td><b>aucune</b> (sonde, volontairement grossière)</td><td class="small">{status, db, active_installations, cursors_in_error, installations[{installation_id, last_run_at, last_run_age_ms, last_run_status, stale}], checked_at} — 503 si dégradé</td></tr>
+  <tr><td><code>GET /admin/overview</code></td><td rowspan="4"><code>x-admin-token</code> ou <code>Authorization: Bearer</code> (comparaison temps constant sans fuite de longueur) + rate-limit/IP (10 jetons, 1/s)</td><td class="small">{active_installations, cursors_in_error, installations[{id, status, shop_domain, last_run}], recent_webhooks[20], generated_at}</td></tr>
+  <tr><td><code>GET /admin/installations/{id}/rejected?limit</code></td><td class="small">{items: RejectedItemRow[]} (cap 500)</td></tr>
+  <tr><td><code>POST /admin/sync/{id}?full=true</code></td><td class="small">{success, summary}</td></tr>
+  <tr><td><code>GET /admin/status/{id}</code></td><td class="small">{runs: SyncRunRow[10]}</td></tr>
+</table>
+
+<h3>1.3 Ce qui MANQUE pour l'UI (les gaps précis)</h3>
+<table>
+  <tr><th>Gap</th><th>Détail</th></tr>
+  <tr><td>Listes paginées</td><td><code>installs</code> (pas de liste complète : seul <code>listActive()</code>), <code>webhook_log</code> par installation, <code>inbound_event</code>, <code>sync_run</code> avec offset/total, <code>rejected_item</code> filtré (entité, date).</td></tr>
+  <tr><td>Métadonnées d'état</td><td>Aucun moyen de lister les clés de <code>integration_state</code> <b>sans lire les valeurs</b> (nécessaire pour l'écran Secrets).</td></tr>
+  <tr><td>Actions</td><td>Pas de purge ciblée d'un rejet (seule la rétention globale), pas de re-provisioning à la demande, pas de révélation PII contrôlée.</td></tr>
+  <tr><td>Audit</td><td>Aucune table <code>audit_log</code> : les actions admin ne laissent aucune trace structurée.</td></tr>
+  <tr><td>Session navigateur</td><td>Auth uniquement par en-tête — impraticable/risquée pour un navigateur (token dans localStorage/URL).</td></tr>
+  <tr><td>Divers</td><td><code>SyncSummary</code> ne trace pas le mode full/incrémental ; la version du kit n'est pas exposée ; <code>meta.name/version</code> de l'intégration ne sont pas servis.</td></tr>
+</table>
+<div class="callout warn"><b>Correction du brief :</b> le brief parle de « runtime Fastify » — le kit est sur <b>Hapi</b> depuis l'origine (<code>createServer()</code> dans <code>src/http/server.ts</code>). La proposition s'appuie donc sur Hapi (routes, <code>h.response().state()</code> pour les cookies, second listener).</div>
+
+<!-- ================================================================ -->
+<h2 id="s2">2. Maquette interactive</h2>
+<p class="maq-note">Maquette navigable (données factices réalistes, teinte Hiboutik) : cliquez la <b>navigation de gauche</b>, les <b>onglets</b> du détail, une <b>ligne d'installation</b>, testez <span class="kbd">Thème</span> / <span class="kbd">FR·EN</span> (démo). Les états <i>vide / erreur / chargement</i> et les <b>modales de confirmation</b> sont montrés en bas de chaque écran concerné. C'est exactement le rendu cible de la page unique <code>/admin/ui</code>.</p>
+
+<div class="app" id="app">
+  <div class="a-top">
+    <div class="a-brand"><span class="a-dot"></span> Hiboutik POS <small>· console d'exploitation — kit ShopiMind v1.5.0</small></div>
+    <input class="a-search" value="" placeholder="Rechercher (installation, domaine, entité…)  /">
+    <span class="sp"></span>
+    <span class="a-chip" id="t-lang" title="Bascule i18n (démo)">FR</span>
+    <span class="a-chip" id="t-theme" title="Bascule thème">☾ Sombre</span>
+    <span class="a-chip on" title="Session admin — expire dans 11 h 42">admin · déconnexion</span>
+  </div>
+  <div class="a-body">
+    <nav class="a-nav">
+      <div class="sect">Exploitation</div>
+      <a data-s="dash" class="on">Tableau de bord</a>
+      <a data-s="installs">Installations</a>
+      <a data-s="rejects">Rejets <span class="cnt">14</span></a>
+      <div class="sect">Traçabilité</div>
+      <a data-s="audit">Audit</a>
+      <a data-s="login" style="margin-top:22px">— Écran de connexion</a>
+    </nav>
+
+    <main class="a-main">
+
+      <!-- ========== ÉCRAN : LOGIN ========== -->
+      <section class="a-screen" data-s="login">
+        <div class="a-login">
+          <div class="a-brand" style="margin-bottom:14px"><span class="a-dot"></span> Hiboutik POS <small>· admin</small></div>
+          <label class="a-soft" style="font-size:12px">Jeton administrateur (<span class="m">ADMIN_TOKEN</span>)</label>
+          <input type="password" value="••••••••••••••••••••••••">
+          <button class="a-btn" style="width:100%">Ouvrir la session</button>
+          <p class="a-soft" style="font-size:11.5px;margin-top:12px">Le jeton est échangé contre un cookie de session <b>HttpOnly</b> (12 h). Il n'est jamais stocké dans le navigateur. 5 essais / minute.</p>
+          <div class="a-alert" style="margin-top:10px">Jeton invalide. Tentative journalisée (audit) — 3 essais restants.</div>
+        </div>
+      </section>
+
+      <!-- ========== ÉCRAN : DASHBOARD ========== -->
+      <section class="a-screen on" data-s="dash">
+        <div class="a-h1">Tableau de bord <span class="pill ok">SANTÉ : OK</span> <span class="a-soft" style="font-weight:400;font-size:11.5px">actualisé il y a 12 s · auto-refresh 30 s <span class="a-chip on" style="font-size:10.5px">ON</span></span></div>
+        <div class="a-cards">
+          <div class="a-card ok"><div class="k">Base SQLite</div><div class="v">OK</div><div class="s">ping 0,4 ms · 18,2 Mo</div></div>
+          <div class="a-card"><div class="k">Installations</div><div class="v">2<span style="font-size:12px;color:var(--a-soft)"> /3</span></div><div class="s">2 actives · 1 inactive</div></div>
+          <div class="a-card"><div class="k">Dernière sync</div><div class="v">4 min</div><div class="s">run #212 · ok · incrémental</div></div>
+          <div class="a-card err"><div class="k">Curseurs en erreur</div><div class="v">1</div><div class="s">orders / store-2 · backoff ×3</div></div>
+          <div class="a-card warn"><div class="k">Rejets en attente</div><div class="v">14</div><div class="s">dont 12 « customers »</div></div>
+          <div class="a-card"><div class="k">Webhooks 24 h</div><div class="v">9<span style="font-size:12px;color:var(--a-soft)"> /10</span></div><div class="s">1 signature refusée</div></div>
+        </div>
+        <div class="a-grid2">
+          <div>
+            <div class="a-h1" style="font-size:13px">Installations actives</div>
+            <table class="a-tbl">
+              <tr><th>Installation</th><th>Dernier run</th><th>Retard</th></tr>
+              <tr class="click" onclick="go('detail')"><td><span class="m">inst_9f2c81d7a3</span><br><span class="a-soft">maisonlacroix.fr</span></td><td><span class="pill ok">ok</span> <span class="a-soft">il y a 4 min</span></td><td><span class="pill ok">à jour</span></td></tr>
+              <tr class="click" onclick="go('detail')"><td><span class="m">inst_4bd10c22e8</span><br><span class="a-soft">atelier-verde.fr</span></td><td><span class="pill warn">partial</span> <span class="a-soft">il y a 38 min</span></td><td><span class="pill warn">stale &gt; 6 h : non</span></td></tr>
+            </table>
+          </div>
+          <div>
+            <div class="a-h1" style="font-size:13px">Derniers webhooks lifecycle</div>
+            <table class="a-tbl">
+              <tr><th>Événement</th><th>Installation</th><th>Signature</th><th>Reçu</th></tr>
+              <tr><td class="m">integration.config_updated</td><td class="m">inst_9f2c…</td><td><span class="pill ok">valide</span></td><td class="a-soft">10:42</td></tr>
+              <tr><td class="m">integration.activated</td><td class="m">inst_4bd1…</td><td><span class="pill ok">valide</span></td><td class="a-soft">09:17</td></tr>
+              <tr><td class="m">unknown</td><td class="a-soft">—</td><td><span class="pill err">refusée</span></td><td class="a-soft">08:55</td></tr>
+            </table>
+            <p class="a-soft" style="font-size:11px;margin-top:6px">Versions : kit <span class="m">1.5.0</span> · intégration <span class="m">hiboutik 1.2.0</span> · Node <span class="m">22.22</span> · schéma <span class="m">v7</span></p>
+          </div>
+        </div>
+        <div style="margin-top:14px" class="a-grid2">
+          <div><div class="a-h1" style="font-size:12px;color:var(--a-soft)">État : chargement</div>
+            <div class="a-card"><div class="skl" style="width:40%"></div><div class="skl" style="width:70%;margin-top:8px"></div><div class="skl" style="width:55%;margin-top:8px"></div></div></div>
+          <div><div class="a-h1" style="font-size:12px;color:var(--a-soft)">État : API indisponible</div>
+            <div class="a-alert">Impossible de joindre <span class="m">/admin/overview</span> (HTTP 503 — santé dégradée). Nouvelle tentative dans 10 s. <u>Réessayer maintenant</u></div></div>
+        </div>
+      </section>
+
+      <!-- ========== ÉCRAN : INSTALLATIONS ========== -->
+      <section class="a-screen" data-s="installs">
+        <div class="a-h1">Installations <span class="a-soft" style="font-weight:400;font-size:11.5px">3 au total</span>
+          <span class="sp" style="flex:1"></span>
+          <span class="a-chip on">Toutes</span><span class="a-chip">Actives</span><span class="a-chip">Inactives</span><span class="a-chip">Désinstallées</span>
+        </div>
+        <table class="a-tbl">
+          <tr><th>Installation</th><th>Boutique</th><th>Compte intégrateur</th><th>Statut</th><th>Installée</th><th>Activée</th><th>Dernier run</th></tr>
+          <tr class="click" onclick="go('detail')">
+            <td class="m">inst_9f2c81d7a3</td><td>maisonlacroix.fr<br><span class="a-soft">Maison Lacroix</span></td><td class="m">hib_acc_412</td>
+            <td><span class="pill ok">active</span></td><td class="a-soft">12/06/2026</td><td class="a-soft">12/06/2026</td><td><span class="pill ok">ok</span> <span class="a-soft">il y a 4 min</span></td></tr>
+          <tr class="click" onclick="go('detail')">
+            <td class="m">inst_4bd10c22e8</td><td>atelier-verde.fr<br><span class="a-soft">Atelier Verde</span></td><td class="m">hib_acc_559</td>
+            <td><span class="pill ok">active</span></td><td class="a-soft">18/06/2026</td><td class="a-soft">19/06/2026</td><td><span class="pill warn">partial</span> <span class="a-soft">il y a 38 min</span></td></tr>
+          <tr class="click">
+            <td class="m">inst_71e03aa914</td><td>demo-sandbox.fr<br><span class="a-soft">Bac à sable</span></td><td class="a-soft">—</td>
+            <td><span class="pill mut">inactive</span></td><td class="a-soft">02/06/2026</td><td class="a-soft">—</td><td class="a-soft">jamais</td></tr>
+        </table>
+        <p class="a-soft" style="font-size:11.5px">Page 1/1 · 50 par page</p>
+        <div class="a-h1" style="font-size:12px;color:var(--a-soft);margin-top:14px">État : vide</div>
+        <div class="a-empty">Aucune installation pour le moment.<br>Cette instance n'a encore reçu aucun webhook <span class="m">integration.installed</span> de ShopiMind.</div>
+      </section>
+
+      <!-- ========== ÉCRAN : DÉTAIL INSTALLATION ========== -->
+      <section class="a-screen" data-s="detail">
+        <div class="a-h1"><a onclick="go('installs')" style="cursor:pointer;color:var(--a-soft)">Installations /</a> <span class="m">inst_9f2c81d7a3</span> <span class="pill ok">active</span> <span class="a-soft" style="font-weight:400">maisonlacroix.fr · Maison Lacroix · compte <span class="m">hib_acc_412</span></span>
+          <span class="sp" style="flex:1"></span>
+          <button class="a-btn" onclick="show('m-sync')">⟳ Synchroniser…</button>
+          <button class="a-btn ghost" onclick="show('m-prov')">Re-provisionner…</button>
+        </div>
+        <div class="a-tabs" id="dtabs">
+          <span class="on" data-t="t-over">Aperçu</span><span data-t="t-prov">Provisioning</span><span data-t="t-cur">Curseurs</span><span data-t="t-runs">Runs</span><span data-t="t-wh">Webhooks</span><span data-t="t-idem">Entrant &amp; idempotence</span><span data-t="t-state">État &amp; secrets</span>
+        </div>
+
+        <div class="dtab on" id="t-over">
+          <div class="a-grid2">
+            <div class="a-kv">
+              <div><b>installation_id (opaque)</b><span class="m">inst_9f2c81d7a3</span></div>
+              <div><b>Statut</b><span><span class="pill ok">active</span></span></div>
+              <div><b>Installée / activée</b><span>12/06/2026 09:31 · 12/06/2026 09:38</span></div>
+              <div><b>Désactivée / désinstallée</b><span class="a-soft">— · —</span></div>
+              <div><b>Dernier événement lifecycle</b><span class="m">integration.config_updated · 10:42</span></div>
+              <div><b>Compte intégrateur lié</b><span class="m">hib_acc_412 · « Maison Lacroix »</span></div>
+            </div>
+            <div class="a-kv">
+              <div><b>Dernier run</b><span>#212 · <span class="pill ok">ok</span> · incrémental · 3,2 s · il y a 4 min</span></div>
+              <div><b>Curseurs</b><span>5 · <span class="pill err">1 en erreur</span></span></div>
+              <div><b>Rejets (7 j)</b><span><span class="pill warn">14 en attente</span></span></div>
+              <div><b>Webhooks (7 j)</b><span>6 valides · 0 refusé</span></div>
+              <div><b>Idempotence</b><span>212 inbound traités · 3 rejeux courts-circuités</span></div>
+              <div><b>Secret entrant</b><span><span class="pill blue">présent · chiffré</span></span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dtab" id="t-prov">
+          <p class="a-soft" style="font-size:12px">Contenu de <span class="m">integration_state.__provisioning</span> (résolu à l'activation / au config_updated). Une référence utilisée par le code mais absente du mapping est signalée.</p>
+          <div class="a-grid2">
+            <div>
+              <div class="a-h1" style="font-size:12.5px">Sources de données (<span class="m">sourceIds</span>)</div>
+              <table class="a-tbl"><tr><th>Clé (plan)</th><th>id_data_source</th><th>Contrôle</th></tr>
+                <tr><td class="m">hiboutik</td><td class="m">118</td><td><span class="pill ok">référencée</span></td></tr>
+                <tr><td class="m">store-1</td><td class="m">119</td><td><span class="pill ok">référencée</span></td></tr>
+                <tr><td class="m">store-2</td><td class="m">120</td><td><span class="pill ok">référencée</span></td></tr>
+                <tr><td class="m">store-3</td><td class="a-soft">absent</td><td><span class="pill err">incohérence : utilisée par un step, non provisionnée</span></td></tr>
+              </table>
+            </div>
+            <div>
+              <div class="a-h1" style="font-size:12.5px">Définitions custom data (<span class="m">defIds</span>)</div>
+              <table class="a-tbl"><tr><th>Nom</th><th>id_definition</th><th>Contrôle</th></tr>
+                <tr><td class="m">hiboutik_stores</td><td class="m">42</td><td><span class="pill ok">référencée</span></td></tr>
+                <tr><td class="m">hiboutik_contact_store</td><td class="m">43</td><td><span class="pill ok">référencée</span></td></tr>
+              </table>
+              <p class="a-soft" style="font-size:11.5px">Re-provisionner rejoue le plan (find-or-create idempotent, extend convergent champs + relations).</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="dtab" id="t-cur">
+          <table class="a-tbl">
+            <tr><th>Entité</th><th>Source</th><th>Position (last_synced_at)</th><th>Retard</th><th>Statut</th><th>Items</th><th>Échecs consécutifs</th><th>Dernière erreur</th></tr>
+            <tr><td class="m">customers</td><td class="a-soft">global</td><td class="m">2026-07-02 10:41:03Z</td><td><span class="pill ok">4 min</span></td><td><span class="pill ok">ok</span></td><td>38</td><td>0</td><td class="a-soft">—</td></tr>
+            <tr><td class="m">products</td><td class="a-soft">global</td><td class="m">2026-07-02 10:41:07Z</td><td><span class="pill ok">4 min</span></td><td><span class="pill ok">ok</span></td><td>112</td><td>0</td><td class="a-soft">—</td></tr>
+            <tr><td class="m">orders</td><td class="m">store-1</td><td class="m">2026-07-02 10:41:11Z</td><td><span class="pill ok">4 min</span></td><td><span class="pill ok">ok</span></td><td>17</td><td>0</td><td class="a-soft">—</td></tr>
+            <tr><td class="m">orders</td><td class="m">store-2</td><td class="m">2026-07-01 22:15:40Z</td><td><span class="pill err">12 h 29</span></td><td><span class="pill err">error</span></td><td>0</td><td><span class="pill warn">3 · backoff ~8 min</span></td><td class="m" style="color:var(--a-red)">HTTP 500 hiboutik API /orders</td></tr>
+            <tr><td class="m">loyalty_accounts</td><td class="a-soft">global</td><td class="m">2026-07-02 10:41:12Z</td><td><span class="pill ok">4 min</span></td><td><span class="pill ok">ok</span></td><td>9</td><td>0</td><td class="a-soft">—</td></tr>
+          </table>
+          <p class="a-soft" style="font-size:11.5px">Retard = maintenant − last_synced_at, comparé à l'intervalle du scheduler (15 min) : <span class="pill ok" style="font-size:9.5px">≤ 2×</span> <span class="pill warn" style="font-size:9.5px">≤ 8×</span> <span class="pill err" style="font-size:9.5px">au-delà / erreur</span>. La règle d'or reste : un curseur en erreur ne bouge pas (fenêtre rejouée).</p>
+        </div>
+
+        <div class="dtab" id="t-runs">
+          <table class="a-tbl">
+            <tr><th>#</th><th>Déclenché</th><th>Mode</th><th>Statut</th><th>Durée</th><th>Envoyés</th><th>Rejetés</th><th>Étapes (résumé)</th></tr>
+            <tr><td class="m">212</td><td class="a-soft">10:41 · scheduler</td><td><span class="pill mut">incrémental</span></td><td><span class="pill ok">ok</span></td><td>3,2 s</td><td>176</td><td>0</td><td class="a-soft m">customers 38 · products 112 · orders 17+0 · loyalty 9</td></tr>
+            <tr><td class="m">211</td><td class="a-soft">10:26 · scheduler</td><td><span class="pill mut">incrémental</span></td><td><span class="pill warn">partial</span></td><td>11,8 s</td><td>134</td><td class="m" style="color:var(--a-amber)">12</td><td class="a-soft m">customers 12 rejetés (curseur tenu) · orders/store-2 en erreur</td></tr>
+            <tr><td class="m">210</td><td class="a-soft">09:12 · admin (audit #88)</td><td><span class="pill blue">full</span></td><td><span class="pill ok">ok</span></td><td>12 min</td><td>18 432</td><td>2</td><td class="a-soft m">backfill 365 j — 4 entités</td></tr>
+          </table>
+          <p class="a-soft" style="font-size:11.5px">Un clic ouvre le <span class="m">summary_json</span> complet (étapes, erreurs, avancées de curseurs).</p>
+        </div>
+
+        <div class="dtab" id="t-wh">
+          <table class="a-tbl">
+            <tr><th>Reçu</th><th>Événement</th><th>Signature</th><th>Payload (expurgé à l'écriture)</th></tr>
+            <tr><td class="a-soft">10:42:11</td><td class="m">integration.config_updated</td><td><span class="pill ok">valide</span></td><td class="m a-soft">{"configs":{"api_key":"<span class="redct">[redacted]</span>", "store_ids":["1","2"]}, …}</td></tr>
+            <tr><td class="a-soft">12/06 09:38</td><td class="m">integration.activated</td><td><span class="pill ok">valide</span></td><td class="m a-soft">{"access_token":"<span class="redct">[redacted]</span>", "shop_domain":"maisonlacroix.fr", …}</td></tr>
+            <tr><td class="a-soft">12/06 09:31</td><td class="m">integration.installed</td><td><span class="pill ok">valide</span></td><td class="m a-soft">{"installation_id":"inst_9f2c81d7a3", …}</td></tr>
+          </table>
+          <p class="a-soft" style="font-size:11.5px">Filtres : événement · signature valide/refusée · période. Les payloads sont déjà expurgés en base (schéma sensible + redaction) — la révélation PII ne s'applique donc qu'aux champs masqués côté serveur à l'affichage.</p>
+        </div>
+
+        <div class="dtab" id="t-idem">
+          <div class="a-grid2">
+            <div>
+              <div class="a-h1" style="font-size:12.5px">Appels entrants (<span class="m">inbound_event</span>)</div>
+              <table class="a-tbl"><tr><th>Reçu</th><th>Action</th><th>Clé d'idempotence</th><th>Statut</th></tr>
+                <tr><td class="a-soft">10:38</td><td class="m">account-updated</td><td class="m">hib-evt-99812</td><td><span class="pill ok">done</span></td></tr>
+                <tr><td class="a-soft">10:38</td><td class="m">account-updated</td><td class="m">hib-evt-99812</td><td><span class="pill mut">rejeu court-circuité</span></td></tr>
+                <tr><td class="a-soft">10:12</td><td class="m">sale-closed</td><td class="m">hib-evt-99754</td><td><span class="pill err">failed · timeout API</span></td></tr>
+              </table>
+            </div>
+            <div>
+              <div class="a-h1" style="font-size:12.5px">Anti-rejeu webhooks (<span class="m">webhook_seen</span>)</div>
+              <div class="a-kv">
+                <div><b>Signatures retenues (7 j)</b><span>6</span></div>
+                <div><b>Rejeux bloqués (7 j)</b><span>1</span></div>
+                <div><b>Purge de rétention</b><span>quotidienne · 90 j</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dtab" id="t-state">
+          <table class="a-tbl">
+            <tr><th>Clé</th><th>Nature</th><th>Valeur</th><th>Modifiée</th></tr>
+            <tr><td class="m">__access_token</td><td><span class="pill blue">secret · AES-256-GCM</span></td><td class="a-soft">présente · <b>jamais affichée</b></td><td class="a-soft">12/06 09:38</td></tr>
+            <tr><td class="m">__inbound_secret</td><td><span class="pill blue">secret · AES-256-GCM</span></td><td class="a-soft">présente · <b>jamais affichée</b></td><td class="a-soft">12/06 09:38</td></tr>
+            <tr><td class="m">__provisioning</td><td><span class="pill mut">état interne (clair)</span></td><td class="a-soft">JSON — affiché dans l'onglet Provisioning</td><td class="a-soft">10:42</td></tr>
+            <tr><td class="m">hiboutik:webhook_registered</td><td><span class="pill mut">état intégration</span></td><td class="m">"true"</td><td class="a-soft">12/06 09:39</td></tr>
+          </table>
+          <p class="a-soft" style="font-size:11.5px">L'endpoint ne renvoie <b>que des métadonnées</b> pour les lignes <span class="m">encrypted=1</span> (il ne lit jamais leur valeur). Les clés non chiffrées d'un préfixe non réservé (état posé par l'intégration) sont affichées, tronquées à 200 caractères.</p>
+        </div>
+      </section>
+
+      <!-- ========== ÉCRAN : REJETS ========== -->
+      <section class="a-screen" data-s="rejects">
+        <div class="a-h1">Rejets — dead-letter <span class="pill warn">14 en attente</span>
+          <span class="sp" style="flex:1"></span>
+          <button class="a-btn ghost" onclick="show('m-purge')">Purger la sélection…</button>
+          <button class="a-btn" onclick="show('m-sync')">Re-synchroniser l'entité…</button>
+        </div>
+        <p class="a-soft" style="font-size:12px;margin:0 0 8px">Filtres : <span class="a-chip on">install : inst_9f2c…</span> <span class="a-chip on">entité : customers</span> <span class="a-chip">raison</span> <span class="a-chip">période : 7 j</span> — PII <b>masquée par défaut</b>.</p>
+        <table class="a-tbl">
+          <tr><th></th><th>#</th><th>Quand</th><th>Entité</th><th>Source</th><th>Run</th><th>Raison</th><th>Payload</th></tr>
+          <tr><td><input type="checkbox" checked></td><td class="m">1284</td><td class="a-soft">10:26</td><td class="m">customers</td><td class="a-soft">global</td><td class="m">#211</td><td class="m" style="color:var(--a-amber)">rejected during customers push</td><td><u style="cursor:pointer" onclick="show('m-payload')">voir</u></td></tr>
+          <tr><td><input type="checkbox"></td><td class="m">1283</td><td class="a-soft">10:26</td><td class="m">customers</td><td class="a-soft">global</td><td class="m">#211</td><td class="m" style="color:var(--a-amber)">rejected during customers push</td><td><u>voir</u></td></tr>
+          <tr><td><input type="checkbox"></td><td class="m">1272</td><td class="a-soft">09:12</td><td class="m">custom-data/hiboutik_contact_store</td><td class="a-soft">—</td><td class="m">#210</td><td class="m" style="color:var(--a-amber)">rejected during loyalty_accounts push</td><td><u>voir</u></td></tr>
+        </table>
+
+        <div class="a-modal" id="m-payload" style="display:none">
+          <h5>Rejet #1284 — payload (PII masquée)</h5>
+          <div class="payload">{
+  "customer_id": "hib_1042",
+  "email": "<span class="redct">m•••@•••.fr</span>",
+  "first_name": "<span class="redct">M•••</span>",
+  "last_name": "<span class="redct">R•••</span>",
+  "phone": "<span class="redct">+33 6 •• •• •• 42</span>",
+  "group_ids": null        ← cause probable : le DTO core exige un tableau
+}</div>
+          <p>Révéler la PII nécessite une confirmation et sera <b>journalisé</b> (audit : qui, quand, quel item, depuis quelle IP).</p>
+          <div class="row"><button class="a-btn ghost" onclick="hide('m-payload')">Fermer</button><button class="a-btn danger">Révéler la PII (audité)</button></div>
+        </div>
+
+        <div class="a-modal" id="m-purge" style="display:none">
+          <h5>Purger 1 rejet ?</h5>
+          <p>Le rejet #1284 sera <b>définitivement supprimé</b> du dead-letter. Cette action est journalisée. Elle ne modifie rien côté ShopiMind.</p>
+          <p class="m" style="font-size:11px">Tapez <b>PURGER</b> pour confirmer :</p>
+          <input class="a-search" style="max-width:100%" placeholder="PURGER">
+          <div class="row"><button class="a-btn ghost" onclick="hide('m-purge')">Annuler</button><button class="a-btn danger" disabled>Purger</button></div>
+        </div>
+
+        <div class="a-h1" style="font-size:12px;color:var(--a-soft);margin-top:14px">État : vide (l'objectif)</div>
+        <div class="a-empty">Aucun rejet en attente 🎉<br>Les items rejetés par l'API ShopiMind (validation) apparaîtront ici avec leur raison et leur payload masqué.</div>
+      </section>
+
+      <!-- ========== ÉCRAN : AUDIT ========== -->
+      <section class="a-screen" data-s="audit">
+        <div class="a-h1">Journal d'audit <span class="a-soft" style="font-weight:400;font-size:11.5px">append-only · rétention 365 j</span></div>
+        <table class="a-tbl">
+          <tr><th>#</th><th>Quand</th><th>Action</th><th>Cible</th><th>Détails</th><th>IP</th></tr>
+          <tr><td class="m">91</td><td class="a-soft">10:47:02</td><td><span class="pill err">pii_revealed</span></td><td class="m">rejected_item #1284</td><td class="a-soft m">champs: email, phone</td><td class="m">10.0.4.7</td></tr>
+          <tr><td class="m">90</td><td class="a-soft">10:45:20</td><td><span class="pill warn">rejected_purged</span></td><td class="m">inst_9f2c… · 2 items</td><td class="a-soft m">#1280, #1281 (filtre: customers)</td><td class="m">10.0.4.7</td></tr>
+          <tr><td class="m">89</td><td class="a-soft">10:12:44</td><td><span class="pill blue">sync_triggered</span></td><td class="m">inst_9f2c81d7a3</td><td class="a-soft m">mode: full</td><td class="m">10.0.4.7</td></tr>
+          <tr><td class="m">88</td><td class="a-soft">09:58:01</td><td><span class="pill ok">login</span></td><td class="a-soft">session</td><td class="a-soft m">TTL 12 h</td><td class="m">10.0.4.7</td></tr>
+          <tr><td class="m">87</td><td class="a-soft">09:57:40</td><td><span class="pill err">login_failed</span></td><td class="a-soft">session</td><td class="a-soft m">jeton invalide (2/5)</td><td class="m">10.0.4.7</td></tr>
+        </table>
+        <div class="a-modal" id="m-sync" style="display:none">
+          <h5>Déclencher une synchronisation</h5>
+          <p>Installation <span class="m">inst_9f2c81d7a3</span>. <b>Incrémentale</b> (depuis les curseurs) ou <b>complète</b> (backfill 365 j — recharge tout, peut être long).</p>
+          <div class="row" style="justify-content:flex-start"><label><input type="radio" name="sm" checked> incrémentale</label> <label style="margin-left:14px"><input type="radio" name="sm"> complète (full)</label></div>
+          <p class="a-soft" style="font-size:11px">Verrou anti-chevauchement : refusée si un run est déjà en cours pour cette installation. Action journalisée.</p>
+          <div class="row"><button class="a-btn ghost" onclick="hide('m-sync')">Annuler</button><button class="a-btn">Lancer</button></div>
+        </div>
+        <div class="a-modal" id="m-prov" style="display:none">
+          <h5>Re-provisionner ?</h5>
+          <p>Rejoue le plan de provisioning (find-or-create idempotent : sources, définitions custom data — extend convergent champs + relations, événements). Sans danger, mais journalisé.</p>
+          <div class="row"><button class="a-btn ghost" onclick="hide('m-prov')">Annuler</button><button class="a-btn">Re-provisionner</button></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+<p class="maq-note">Empreinte réelle visée pour <code>/admin/ui</code> : ~70–90 kB (HTML+CSS+JS inline, gzip ~20 kB), zéro requête externe, compatible <code>Content-Security-Policy</code> stricte par nonce.</p>
+
+<!-- ================================================================ -->
+<h2 id="s3">3. Mapping exhaustif écran → store</h2>
+
+<h3>3.1 Tableau de bord</h3>
+<table>
+  <tr><th>Champ affiché</th><th>Source exacte</th></tr>
+  <tr><td>Santé globale, ping DB</td><td><code>GET /health</code> (E5) : <code>status</code>, <code>db</code> — + taille du fichier SQLite (nouveau : <code>PRAGMA page_count×page_size</code>)</td></tr>
+  <tr><td>Installations actives/inactives</td><td><code>installs.status</code> (count par statut — nouveau <code>countByStatus()</code>)</td></tr>
+  <tr><td>Dernière sync + mode</td><td><code>sync_run</code> : dernier <code>finished_at</code>, <code>status</code>, <code>summary_json.mode</code> (nouveau champ)</td></tr>
+  <tr><td>Curseurs en erreur / backoff</td><td><code>sync_cursor.last_status='error'</code> (<code>countInError()</code> existant) + <code>consecutive_failures</code></td></tr>
+  <tr><td>Rejets en attente</td><td><code>rejected_item</code> count (nouveau <code>count(filter)</code>) + répartition par <code>entity</code></td></tr>
+  <tr><td>Webhooks 24 h (reçus / refusés)</td><td><code>webhook_log</code> count sur 24 h par <code>signature_ok</code> (nouveau)</td></tr>
+  <tr><td>Curseurs en retard (stale)</td><td><code>/health.installations[].stale</code> (seuil 6 h) + calcul UI vs <code>syncIntervalMinutes</code></td></tr>
+  <tr><td>Versions kit / intégration / schéma</td><td>Const <code>KIT_VERSION</code> (nouveau, générée au build) · <code>integration.meta.name/version</code> · <code>schema_migrations</code> max(version)</td></tr>
+</table>
+
+<h3>3.2 Installations (liste) &amp; Aperçu du détail</h3>
+<table>
+  <tr><th>Champ</th><th>Source</th></tr>
+  <tr><td>installation_id, boutique, compte lié, statut, dates</td><td><code>installs.*</code> : <code>installation_id</code>, <code>shop_domain</code>, <code>shop_name</code>, <code>external_account_ref/_name</code>, <code>status</code>, <code>installed_at</code>, <code>activated_at</code>, <code>deactivated_at</code>, <code>uninstalled_at</code></td></tr>
+  <tr><td>Dernier événement lifecycle</td><td><code>webhook_log</code> dernier row de l'installation (<code>event</code>, <code>created_at</code>)</td></tr>
+  <tr><td>Dernier run / compteurs de l'aperçu</td><td><code>sync_run</code> (dernier), counts <code>sync_cursor</code> / <code>rejected_item</code> / <code>inbound_event</code> / <code>webhook_seen</code> scopés à l'installation</td></tr>
+  <tr><td>« Secret entrant présent »</td><td><code>integration_state</code> : existence de la clé <code>__inbound_secret</code> avec <code>encrypted=1</code> (métadonnée seulement)</td></tr>
+</table>
+
+<h3>3.3 Provisioning</h3>
+<table>
+  <tr><th>Champ</th><th>Source</th></tr>
+  <tr><td>Mapping clé→id des sources / nom→id des définitions</td><td><code>integration_state.__provisioning</code> (JSON <code>{sourceIds, defIds}</code>), parsé <b>côté serveur</b> — l'endpoint ne renvoie que ces deux objets, jamais le blob brut</td></tr>
+  <tr><td>Signalement d'incohérence</td><td>Croisement serveur : clés <code>source_key</code> présentes dans <code>sync_cursor</code> / <code>rejected_item</code> mais absentes de <code>sourceIds</code> → drapeau <code>missing:true</code></td></tr>
+</table>
+
+<h3>3.4 Curseurs · 3.5 Runs · 3.6 Webhooks · 3.7 Idempotence</h3>
+<table>
+  <tr><th>Écran</th><th>Colonnes affichées ← colonnes store</th></tr>
+  <tr><td>Curseurs</td><td><code>sync_cursor</code> : <code>entity</code>, <code>source_key</code> (''→« global »), <code>last_synced_at</code> (position), retard (calc UI), <code>last_status</code>, <code>items</code>, <code>consecutive_failures</code> (+ estimation backoff 2^(k−1) ticks, cap 24 h), <code>last_error</code></td></tr>
+  <tr><td>Runs</td><td><code>sync_run</code> : <code>id</code>, <code>started_at</code>, <code>finished_at</code> (durée), <code>status</code>, <code>summary_json</code> → mode (nouveau), Σ items, Σ rejected, détail par étape (<code>steps[]</code>: entity, sourceKey, items, rejected, errors, advanced, skippedBackoff)</td></tr>
+  <tr><td>Webhooks</td><td><code>webhook_log</code> : <code>created_at</code>, <code>event</code>, <code>signature_ok</code>, <code>payload_json</code> (déjà expurgé à l'écriture ; re-masquage PII à l'affichage par défaut)</td></tr>
+  <tr><td>Entrant &amp; idempotence</td><td><code>inbound_event</code> : <code>received_at</code>, <code>action</code>, <code>idempotency_key</code>, <code>status</code>, <code>error</code>, <code>processed_at</code> · <code>webhook_seen</code> : counts (7 j) + rétention</td></tr>
+</table>
+
+<h3>3.8 État &amp; secrets · 3.9 Rejets · 3.10 Audit</h3>
+<table>
+  <tr><th>Écran</th><th>Mapping</th></tr>
+  <tr><td>État &amp; secrets</td><td><code>integration_state</code> : <code>key</code>, <code>encrypted</code>, <code>updated_at</code>, <code>length(value)</code>. <b>Si <code>encrypted=1</code> : aucune lecture de <code>value</code>.</b> Si clair et clé non réservée : valeur tronquée 200 c.</td></tr>
+  <tr><td>Rejets (vue phare)</td><td><code>rejected_item</code> : <code>id</code>, <code>created_at</code>, <code>entity</code>, <code>source_key</code>, <code>run_id</code> (lien vers le run), <code>reason</code>, <code>payload_json</code> (masqué PII par défaut). Filtres : installation, entité, raison (LIKE), période.</td></tr>
+  <tr><td>Audit</td><td><code>audit_log</code> (nouvelle table §7) : <code>id</code>, <code>at</code>, <code>action</code>, <code>installation_id</code>, <code>target</code>, <code>details_json</code>, <code>ip</code></td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h2 id="s4">4. Actions &amp; garde-fous</h2>
+<table>
+  <tr><th>Action</th><th>Endpoint</th><th>Garde-fous</th><th>Audit</th></tr>
+  <tr><td>Ouvrir / fermer une session</td><td><span class="tag new">NOUVEAU</span> <code>POST /admin/session</code> · <code>DELETE /admin/session</code></td><td>Comparaison temps constant (réutilise l'existant) ; rate-limit login dédié (5/min/IP) ; cookie HttpOnly+SameSite=Strict+Secure ; TTL 12 h glissant</td><td><code>login</code> / <code>login_failed</code> / <code>logout</code></td></tr>
+  <tr><td>Synchroniser (incr./full)</td><td><span class="tag exist">EXISTANT</span> <code>POST /admin/sync/{id}?full</code> (+ CSRF)</td><td>Modale de confirmation (full = avertissement backfill) ; verrou anti-chevauchement déjà en place (refus si run en cours) ; rate-limit admin</td><td><code>sync_triggered</code> {mode}</td></tr>
+  <tr><td>Re-provisionner</td><td><span class="tag new">NOUVEAU</span> <code>POST /admin/installations/{id}/reprovision</code></td><td>Confirmation ; idempotent par conception (find-or-create / extend convergent) ; refus si installation non active</td><td><code>reprovision_triggered</code></td></tr>
+  <tr><td>Purger un rejet / une sélection</td><td><span class="tag new">NOUVEAU</span> <code>POST /admin/rejected/purge</code> {ids | filtre}</td><td>Confirmation par saisie (« PURGER ») pour &gt; 10 items ; suppression bornée (≤ 500/appel) ; scopée installation</td><td><code>rejected_purged</code> {ids/filtre, n}</td></tr>
+  <tr><td>Révéler la PII d'un payload</td><td><span class="tag new">NOUVEAU</span> <code>POST /admin/rejected/{id}/reveal</code> (idem webhooks)</td><td>Confirmation explicite ; réponse non cacheable (<code>Cache-Control: no-store</code>) ; jamais de « tout révéler »</td><td><code>pii_revealed</code> {item, champs}</td></tr>
+  <tr><td>Re-synchroniser l'entité d'un rejet</td><td>= <code>POST /admin/sync/{id}</code> pré-rempli</td><td>Le « rejeu » V1 assumé : re-fenêtrer depuis la source de vérité partenaire (cf. §0.6)</td><td><code>sync_triggered</code></td></tr>
+  <tr><td><span class="tag v2">V2</span> Rejouer un item (hook)</td><td><code>POST /admin/rejected/{id}/replay</code> → <code>integration.replayRejected(ctx, item)</code></td><td>Disponible seulement si l'intégration déclare le hook ; sinon bouton absent (501)</td><td><code>rejected_replayed</code></td></tr>
+</table>
+<div class="callout"><b>Lecture vs action :</b> séparation visuelle (boutons d'action uniquement dans les en-têtes/modales, jamais dans les cellules) et technique (toutes les mutations = POST/DELETE + en-tête CSRF ; les GET ne mutent jamais rien).</div>
+
+<!-- ================================================================ -->
+<h2 id="s5">5. Modèle de sécurité</h2>
+<h3>5.1 Authentification &amp; session</h3>
+<ul>
+  <li><b>Deux modes, un seul secret :</b> (a) <i>scripts/API</i> : en-têtes <code>x-admin-token</code>/Bearer, inchangés (rétrocompat totale) ; (b) <i>navigateur</i> : <code>POST /admin/session</code> échange le jeton contre un <b>cookie de session</b> <code>spm_admin_sid</code> — HttpOnly, <code>SameSite=Strict</code>, <code>Secure</code> (si TLS), <code>Path=/admin</code>.</li>
+  <li><b>Sessions en mémoire</b> (Map id→{expiry, csrf}) : id 256 bits aléatoires ; TTL 12 h glissant ; invalidées au redémarrage du process (re-login — acceptable pour un outil d'exploitation) ; ≤ 20 sessions simultanées (éviction LRU).</li>
+  <li><b>CSRF :</b> défense en profondeur — <code>SameSite=Strict</code> + jeton CSRF par session injecté dans la page, exigé en en-tête <code>x-csrf-token</code> sur toute mutation + vérification <code>Origin</code>/<code>Sec-Fetch-Site</code>.</li>
+  <li><b>Anti-bruteforce :</b> limiteur dédié au login (5/min/IP) en plus du limiteur admin existant ; échecs journalisés (<code>login_failed</code>).</li>
+  <li><b>Force du jeton (kit public = sûr par défaut) :</b> contrôle au démarrage — <code>ADMIN_TOKEN</code> &lt; 16 caractères → refus de monter l'admin ; &lt; 32 → avertissement bruyant. La doc recommande <code>openssl rand -hex 32</code>.</li>
+</ul>
+<h3>5.2 Secrets &amp; PII</h3>
+<ul>
+  <li><b>Secrets :</b> l'endpoint « état » exécute <code>SELECT key, encrypted, updated_at, length(value)</code> — la colonne <code>value</code> d'une ligne chiffrée n'est <b>jamais lue</b>, donc jamais déchiffrée, donc jamais transmissible. Test d'invariant dédié.</li>
+  <li><b>PII :</b> masquage <b>serveur</b> par défaut sur les payloads affichés (emails <code>m•••@•••.fr</code>, téléphones, champs nominatifs — réutilise <code>redact()</code> + motifs email/téléphone). La révélation est unitaire, confirmée, auditée, non cacheable. Les payloads de <code>webhook_log</code> sont déjà expurgés à l'écriture (schéma sensible) — double filet.</li>
+  <li><b>Rétention (RGPD) :</b> purge quotidienne existante (<code>retentionDays</code>, défaut 90 j) appliquée à <code>webhook_log</code>, <code>webhook_seen</code>, <code>inbound_event</code>, <code>rejected_item</code> ; <code>audit_log</code> a sa propre rétention (365 j, configurable).</li>
+</ul>
+<h3>5.3 Exposition réseau &amp; en-têtes</h3>
+<ul>
+  <li><b>Isolation :</b> option <code>adminPort</code> (+ <code>adminHost</code>, défaut <code>127.0.0.1</code> quand <code>adminPort</code> est posé) → second listener Hapi qui porte <b>seul</b> <code>/admin/*</code> + <code>/admin/ui</code> ; le listener public ne sert alors plus que <code>/webhook/*</code>, <code>/inbound/*</code>, <code>/health</code>. Sans l'option : même port (compat), la doc exige un firewalling de <code>/admin</code> à l'ingress <b>et le kit émet un avertissement bruyant au démarrage</b> (« admin UI servie sur le listener public — utilisez adminPort ou une allowlist à l'ingress »).</li>
+  <li><b>Rate-limit derrière proxy — limite documentée :</b> l'IP vue est celle du proxy (le kit ne lit pas <code>X-Forwarded-For</code>, spoofable par défaut). Limite préexistante du kit, documentée dans le guide « Operate » ; une option <code>trustProxy</code> pourra venir plus tard si un besoin réel l'exige.</li>
+  <li><b>CSP stricte par nonce :</b> <code>default-src 'none'; script-src 'nonce-…'; style-src 'nonce-…'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'</code> + <code>X-Content-Type-Options: nosniff</code>, <code>Referrer-Policy: no-referrer</code>, <code>Cache-Control: no-store</code> sur toutes les réponses admin.</li>
+  <li><b>Multi-tenant :</b> chaque endpoint de détail est scopé par <code>installation_id</code> (paramètre de chemin) ; aucune jointure inter-installations ; l'agrégat (overview) n'expose que des ids opaques + domaines déjà connus de l'intégrateur. Tests de scoping (une installation A ne peut pas lire les rejets de B via un id forgé — chaque requête filtre <code>WHERE installation_id = ?</code>).</li>
+</ul>
+
+<!-- ================================================================ -->
+<h2 id="s6">6. Architecture technique &amp; API</h2>
+<h3>6.1 Principe</h3>
+<pre><code>Navigateur ──(cookie session + CSRF)──▶ /admin/ui (HTML unique, nonce CSP)
+                                        /admin/*  (JSON — la SEULE couche données)
+Scripts/CI ──(x-admin-token / Bearer)─▶ /admin/*  (inchangé)
+UI = fetch() vanilla → tableaux rendus à la main (~600 lignes de JS, 0 dépendance)</code></pre>
+<h3>6.2 Endpoints JSON — état final</h3>
+<table>
+  <tr><th></th><th>Endpoint</th><th>Rôle / retours</th></tr>
+  <tr><td><span class="tag exist">EXISTANT</span></td><td><code>GET /health</code> · <code>GET /admin/overview</code> · <code>GET /admin/status/{id}</code> · <code>GET /admin/installations/{id}/rejected</code> · <code>POST /admin/sync/{id}</code></td><td>Inchangés (rétrocompat) ; s'ajoutent l'auth session + CSRF pour le navigateur.</td></tr>
+  <tr><td><span class="tag new">NOUVEAU</span></td><td><code>POST /admin/session</code> · <code>DELETE /admin/session</code></td><td>Login/logout navigateur (§5.1).</td></tr>
+  <tr><td><span class="tag new">NOUVEAU</span></td><td><code>GET /admin/ui</code></td><td>La page unique (nonce CSP). Redirige vers l'écran login si pas de session.</td></tr>
+  <tr><td><span class="tag new">NOUVEAU</span></td><td><code>GET /admin/meta</code></td><td>{kit_version, integration:{slug,name,version}, schema_version, node, db:{size_bytes}, options:{syncIntervalMinutes, retentionDays}}.</td></tr>
+  <tr><td><span class="tag new">NOUVEAU</span></td><td><code>GET /admin/installations?status&amp;q&amp;limit&amp;offset</code></td><td>Liste paginée + total (nouveau repo <code>installs.list()</code>).</td></tr>
+  <tr><td><span class="tag new">NOUVEAU</span></td><td><code>GET /admin/installations/{id}</code></td><td>Détail agrégé : install + dernier webhook + compteurs + provisioning parsé {sourceIds, defIds, inconsistencies[]} + présence secrets (méta).</td></tr>
+  <tr><td><span class="tag new">NOUVEAU</span></td><td><code>GET /admin/installations/{id}/cursors</code> · <code>/runs?limit&amp;offset</code> · <code>/webhooks?event&amp;sig&amp;limit&amp;offset</code> · <code>/inbound?limit&amp;offset</code> · <code>/state</code></td><td>Les listes du détail (state = métadonnées uniquement, §5.2).</td></tr>
+  <tr><td><span class="tag new">NOUVEAU</span></td><td><code>GET /admin/rejected?installation&amp;entity&amp;since&amp;q&amp;limit&amp;offset</code></td><td>Vue globale filtrée du dead-letter (payloads masqués).</td></tr>
+  <tr><td><span class="tag new">NOUVEAU</span></td><td><code>POST /admin/rejected/purge</code> · <code>POST /admin/rejected/{id}/reveal</code> · <code>POST /admin/installations/{id}/reprovision</code></td><td>Actions §4 (CSRF + audit).</td></tr>
+  <tr><td><span class="tag new">NOUVEAU</span></td><td><code>GET /admin/audit?limit&amp;offset</code></td><td>Journal d'audit (lecture seule).</td></tr>
+  <tr><td><span class="tag v2">V2</span></td><td><code>POST /admin/rejected/{id}/replay</code></td><td>501 si l'intégration ne déclare pas <code>replayRejected</code>.</td></tr>
+</table>
+<p class="small">Toutes les listes : <code>limit</code> défaut 50, cap dur 200 (500 pour rejets) ; réponse <code>{items, total, limit, offset}</code>. Tous les endpoints admin : rate-limit IP existant + <code>no-store</code>.</p>
+<h3>6.3 Stack front &amp; embarquement</h3>
+<ul>
+  <li><b>Vanilla</b> : un fichier <code>src/admin-ui/ui.html</code> (source de vérité, éditable), CSS variables (thème clair/sombre via <code>prefers-color-scheme</code> + toggle persisté <code>localStorage</code> — préférence d'affichage uniquement, jamais de secret), dictionnaire i18n fr/en embarqué (~120 clés), <code>fetch()</code> + rendu DOM manuel, auto-refresh 30 s (Page Visibility API : pause si onglet caché).</li>
+  <li><b>Embarquement dans <code>dist/</code></b> : script <code>scripts/embed-admin-ui.mjs</code> (prebuild) qui génère <code>src/http/admin-ui.generated.ts</code> (<code>export const ADMIN_UI_HTML = "…"</code> + <code>KIT_VERSION</code> depuis package.json). Même philosophie que les migrations SQL embarquées : aucun asset à copier, <code>files:["dist"]</code> inchangé. Empreinte : ~70–90 kB bruts dans le bundle.</li>
+  <li><b>Activation :</b> l'UI n'est montée que si <code>adminToken</code> est configuré (comme les routes admin aujourd'hui) ; option <code>adminUi: false</code> pour la désactiver explicitement.</li>
+</ul>
+
+<!-- ================================================================ -->
+<h2 id="s7">7. Changements kit nécessaires (hors UI elle-même)</h2>
+<table>
+  <tr><th>Changement</th><th>Nature</th></tr>
+  <tr><td><b>Migration v7</b> — <code>audit_log</code> (id, at, action, installation_id NULL, target NULL, details_json NULL, ip NULL) + index (at). Append-only, purge à 365 j (option <code>auditRetentionDays</code>).</td><td><span class="tag new">migration</span></td></tr>
+  <tr><td><b>Repos</b> : <code>installs.list({status?, q?, limit, offset})</code> + <code>countByStatus()</code> ; <code>webhookLog.listByInstallation(...)</code> + <code>countSince(24h)</code> ; <code>inboundEvents.listByInstallation(...)</code> ; <code>state.listMeta(id)</code> (jamais <code>value</code> si chiffrée) ; <code>rejectedItems.list(filter)</code>/<code>count(filter)</code>/<code>deleteByIds(ids)</code> ; <code>runs.list(id, limit, offset)</code> + <code>count(id)</code> ; <code>audit.add()/list()/purgeOlderThan()</code>.</td><td><span class="tag new">repos</span></td></tr>
+  <tr><td><b><code>SyncSummary.mode</code></b> : le moteur inscrit <code>mode: 'full' | 'incremental'</code> dans le résumé (additif — l'information existe déjà dans <code>opts.fullBackfill</code>).</td><td><span class="tag new">moteur</span></td></tr>
+  <tr><td><b>Session manager</b> (<code>src/http/admin-session.ts</code>) : sessions mémoire, cookies, CSRF, limiteur login. Aucune dépendance (crypto natif).</td><td><span class="tag new">http</span></td></tr>
+  <tr><td><b>Masquage PII</b> (<code>src/security/pii-mask.ts</code>) : masque emails/téléphones/champs nominatifs dans un JSON — réutilisé par les endpoints payloads.</td><td><span class="tag new">sécurité</span></td></tr>
+  <tr><td><b>Second listener</b> optionnel <code>adminPort</code>/<code>adminHost</code> dans <code>createIntegrationApp</code> (déplace les routes admin + UI).</td><td><span class="tag new">runtime</span></td></tr>
+  <tr><td><b>Génération</b> <code>scripts/embed-admin-ui.mjs</code> + hook <code>prebuild</code> ; expose aussi <code>KIT_VERSION</code>.</td><td><span class="tag new">build</span></td></tr>
+  <tr><td><span class="tag v2">V2</span> Hook <code>replayRejected?(ctx, item)</code> dans le contrat <code>Integration</code> + endpoint replay.</td><td>contrat (optionnel)</td></tr>
+</table>
+<p class="small">Versionnement : le tout est <b>additif</b> → release mineure du kit (ex. <code>1.5.0</code>). Aucun changement cassant : API admin existante intacte, options nouvelles toutes facultatives.</p>
+
+<!-- ================================================================ -->
+<h2 id="s8">8. Plan d'implémentation jalonné &amp; tests</h2>
+<table>
+  <tr><th>Jalon</th><th>Contenu</th><th>Critère d'acceptation</th></tr>
+  <tr><td><b>J1 — Données &amp; API lecture</b></td><td>Migration v7, nouveaux repos, <code>SyncSummary.mode</code>, endpoints GET (installations, détail, cursors, runs, webhooks, inbound, state-méta, rejected filtré, meta, audit), masquage PII serveur.</td><td>Tous les écrans alimentables en <code>curl</code> ; vitest verts ; rétrocompat (aucun test existant modifié hors ajouts).</td></tr>
+  <tr><td><b>J2 — Session &amp; UI lecture</b></td><td>Session/CSRF/login + <code>GET /admin/ui</code> (page embarquée) : dashboard, installations, détail complet, rejets, audit — en lecture. Thème, i18n, auto-refresh, états vides/erreur/chargement.</td><td>Parcours complet au navigateur sans jamais toucher SQLite ; CSP sans violation console.</td></tr>
+  <tr><td><b>J3 — Actions</b></td><td>Sync (déjà là, + CSRF/confirmations), reprovision, purge rejets, reveal PII — toutes auditées ; écran Audit branché.</td><td>Chaque action laisse une ligne d'audit exacte ; refus propres (401/403/409/429) testés.</td></tr>
+  <tr><td><b>J4 — Isolation &amp; polish</b></td><td><code>adminPort</code>/<code>adminHost</code> (second listener), en-têtes durcis, responsive final, docs (README + guide « Operate »), CHANGELOG, release mineure.</td><td><code>yarn build</code> + <code>yarn test</code> verts ; <code>npm pack</code> propre ; doc publiée.</td></tr>
+</table>
+<h3>Tests de sécurité exigés (vitest — invariants)</h3>
+<ol class="small">
+  <li>401 sans jeton ni session sur <b>chaque</b> route <code>/admin/*</code> (paramétré sur la table des routes) ; 401 aussi avec cookie forgé/expiré.</li>
+  <li>Mutations sans en-tête CSRF → 403, même avec session valide.</li>
+  <li><code>/admin/installations/{id}/state</code> ne contient <b>jamais</b> <code>value</code> pour <code>encrypted=1</code> (assertion sur le JSON brut) ; le jeton d'accès chiffré n'apparaît dans <b>aucune</b> réponse admin (scan de toutes les réponses).</li>
+  <li>Payloads rejets/webhooks : emails/téléphones masqués par défaut (regex sur la réponse) ; <code>reveal</code> écrit une ligne <code>pii_revealed</code> avant de répondre.</li>
+  <li>Scoping : les rejets/curseurs/runs de l'installation B n'apparaissent jamais sous l'id A.</li>
+  <li>Login : 6ᵉ tentative en 1 min → 429 ; <code>login_failed</code> audité.</li>
+  <li>Rétrocompat : les 5 endpoints existants répondent à l'identique avec l'auth en-tête (snapshots).</li>
+</ol>
+
+<!-- ================================================================ -->
+<h2 id="s9">9. Questions ouvertes à trancher (avant J1)</h2>
+<ol>
+  <li><b>Isolation par défaut :</b> quand <code>adminPort</code> n'est pas posé, faut-il (a) servir l'UI sur le port public comme les routes admin actuelles (compat maximale — mon choix par défaut), ou (b) exiger <code>adminPort</code> pour activer l'UI (posture plus dure) ?</li>
+  <li><b>Révélation PII :</b> l'admin unique suffit-il (mon choix V1 : oui, car mono-opérateur), ou faut-il un second secret dédié (<code>PII_REVEAL_TOKEN</code>) pour séparer les pouvoirs dès la V1 ?</li>
+  <li><b>Hook <code>replayRejected</code> :</b> on le spécifie dès maintenant dans le contrat (quitte à l'implémenter en V2), ou on attend un besoin réel Hiboutik ?</li>
+  <li><b>Rétention distincte :</b> <code>rejectedRetentionDays</code> séparé du <code>retentionDays</code> global (les rejets méritent parfois plus long) — oui/non ?</li>
+  <li><b>Langue par défaut de l'UI :</b> fr (marché actuel) avec bascule en, ou en par défaut (cohérent avec le README public) ?</li>
+  <li><b>Nom de l'écran phare :</b> « Rejets » (choisi ici) vs « Dead-letter » — préférence ?</li>
+</ol>
+
+<div class="callout" style="margin-top:26px"><b>Prochain pas :</b> valider/amender cette maquette (y compris les 6 questions ci-dessus) → J1. Aucune ligne d'implémentation ne sera écrite avant cette validation.</div>
+<p class="meta">Document de conception — kit <code>@shopimind/integration-kit-js</code> v1.4.0 (inventaire) → cible v1.5.0. Fichier autoportant, aucune ressource externe.</p>
+</div>
+
+<script>
+  /* Maquette : navigation écrans + onglets + thème + i18n (démo) */
+  const nav=document.querySelectorAll('.a-nav a');
+  function go(s){
+    document.querySelectorAll('.a-screen').forEach(e=>e.classList.toggle('on',e.dataset.s===s));
+    nav.forEach(a=>a.classList.toggle('on',a.dataset.s===s||((s==='detail')&&a.dataset.s==='installs')));
+  }
+  nav.forEach(a=>a.addEventListener('click',()=>go(a.dataset.s)));
+  document.querySelectorAll('#dtabs span').forEach(t=>t.addEventListener('click',()=>{
+    document.querySelectorAll('#dtabs span').forEach(x=>x.classList.toggle('on',x===t));
+    document.querySelectorAll('.dtab').forEach(d=>d.classList.toggle('on',d.id===t.dataset.t));
+  }));
+  function show(id){const m=document.getElementById(id);if(m)m.style.display='block';if(id==='m-sync'||id==='m-prov')go('audit');}
+  function hide(id){document.getElementById(id).style.display='none';}
+  window.go=go;window.show=show;window.hide=hide;
+  const app=document.getElementById('app');
+  document.getElementById('t-theme').addEventListener('click',function(){
+    app.classList.toggle('light');
+    this.textContent=app.classList.contains('light')?'☀ Clair':'☾ Sombre';
+  });
+  const i18n={ 'Tableau de bord':'Dashboard','Installations':'Installations','Rejets':'Rejects','Audit':'Audit','— Écran de connexion':'— Login screen','Exploitation':'Operations','Traçabilité':'Traceability' };
+  let en=false;
+  document.getElementById('t-lang').addEventListener('click',function(){
+    en=!en;this.textContent=en?'EN':'FR';
+    document.querySelectorAll('.a-nav a, .a-nav .sect').forEach(el=>{
+      const base=el.dataset.fr||(el.dataset.fr=el.childNodes[0].textContent.trim());
+      el.childNodes[0].textContent=(en&&i18n[base]?i18n[base]:base)+(el.querySelector('.cnt')?' ':'');
+    });
+  });
+</script>
+</body>
+</html>

@@ -106,12 +106,42 @@ void app.start();
 | `syncSteps` | the sync steps — **the cursor is managed by the kit** |
 | `hooks` *(optional)* | lifecycle callbacks (`onActivate`, `onConfigUpdated`, ...) |
 
+## Admin operations UI
+
+The kit ships a small, self-contained **operations console** for you, the integrator — set
+an `adminToken` and open `http://<host>:<port>/admin/ui`. It runs entirely on your side (it
+only reads the local SQLite store) and lets you:
+
+- browse **installations** and drill into cursors, sync runs, webhooks, inbound events and state;
+- inspect the **dead-letter** (items the ShopiMind API refused) and the **audit trail**;
+- trigger **sync**, **reprovision**, **purge** a rejected item, or **reveal** a single payload.
+
+Safe by default: **PII is masked** (emails, phones, names…) unless you explicitly reveal it
+(an audited action), **secrets are never returned**, browser access uses an HttpOnly
+`SameSite=Strict` session cookie + a CSRF token, and every action is rate-limited.
+
+```ts
+const app = createIntegrationApp(integration, {
+  databasePath: env.DATABASE_PATH ?? './data/store.sqlite',
+  webhookSecret: env.WEBHOOK_SECRET!,
+  credentialsKey: env.CREDENTIALS_KEY,
+  adminToken: env.ADMIN_TOKEN,   // enables /admin/* and the UI (use a 32+ char high-entropy token)
+  adminPort: 9090,               // recommended: serve /admin on a PRIVATE listener…
+  adminHost: '127.0.0.1',        // …bound to loopback (the default when adminPort is set)
+  adminSecureCookie: true,       // mark the session cookie Secure (serve the UI over HTTPS)
+});
+```
+
+> Keep the admin port on a private interface (or behind your ingress). When `adminPort` is
+> omitted, `/admin/*` shares the public server — fine for local dev, warned about otherwise.
+
 ## Guarantees
 
 - The **cursor only advances when a step finished without error** → no silent data loss; the window is replayed on the next run.
 - **Partner secrets are encrypted** at rest and **redacted in logs**.
 - **Pagination streams** and **concurrency is bounded** → controlled memory, no request bursts.
 - **Webhooks are verified** (signature + anti-replay window) **before** any processing.
+- **The admin UI is integrator-side and safe by default** — PII masked, secrets never returned, every action audited, session cookie hardened.
 
 ## License
 

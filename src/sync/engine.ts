@@ -91,6 +91,8 @@ export function rejectsTolerated(
 export interface SyncSummary {
   runId: number;
   status: 'ok' | 'partial';
+  /** Whether this run was a full backfill or an incremental sync (admin observability). */
+  mode: 'full' | 'incremental';
   steps: SyncStepSummary[];
   errors: string[];
 }
@@ -136,7 +138,7 @@ export async function runIntegrationSync<S>(
   const overlapSeconds = opts.overlapSeconds ?? 0;
 
   const runId = deps.runs.start(base.installationId);
-  const summary: SyncSummary = { runId, status: 'ok', steps: [], errors: [] };
+  const summary: SyncSummary = { runId, status: 'ok', mode: full ? 'full' : 'incremental', steps: [], errors: [] };
   // Per-run budget shared across all step-sources: caps total dead-lettered items (E4).
   const deadLetterBudget = { remaining: REJECTED_ITEMS_CAP_PER_RUN };
 

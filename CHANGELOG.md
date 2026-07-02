@@ -4,6 +4,54 @@ All notable changes to `@shopimind/integration-kit-js` are documented here.
 This project follows [Semantic Versioning](https://semver.org/): `patch` = fix,
 `minor` = backward-compatible addition, `major` = breaking change.
 
+## 1.5.0
+
+Adds an **embedded admin operations UI** for the integrator — a local, self-contained
+console to observe and operate the integration (installations, sync runs, webhooks,
+inbound events, state, dead-letter, audit) and trigger safe actions (sync, reprovision,
+reveal, purge). **Everything is additive and backward compatible**; two new embedded
+SQLite migrations (7 = the audit trail, 8 = admin query/retention indexes) are applied
+automatically. The UI is **100% integrator-side** — it only reads the local SQLite store
+and talks to the ShopiMind API through the existing sync engine. No ShopiMind account,
+service or database is involved.
+
+### Admin surface & UI
+
+- **Operations UI** at `GET /admin/ui` — a single self-contained HTML page (no external
+  asset, strict per-request nonce CSP), served from a string compiled into `dist` (source
+  in `src/admin-ui/ui.html`, embedded by a prebuild step).
+- **Read API** (admin-gated): `/admin/meta`, `/admin/installations[/{id}]`, and per
+  installation `…/cursors`, `…/runs`, `…/webhooks`, `…/inbound`, `…/state`, plus a global
+  `/admin/rejected` and `/admin/audit`. All list endpoints paginate.
+- **Browser session auth** — `POST /admin/session` exchanges the admin token for an
+  HttpOnly, `SameSite=Strict` cookie + a CSRF token. Reads accept the cookie OR the
+  `x-admin-token` header; a session's state-changing calls must also present the CSRF
+  token (`x-csrf-token`). Sessions are bounded (sliding 12h TTL, LRU cap).
+- **Actions** (audited): `POST /admin/sync/{id}`, `…/reprovision`, `/admin/rejected/purge`
+  (installation-scoped), and audited **reveal** of a single webhook / rejected payload.
+- **PII masking by default.** Webhook and dead-letter payloads are masked (emails, phones,
+  names, addresses — including values given as JSON numbers and PII embedded in free text)
+  before display; the raw value is only exposed by the separate, audited reveal action.
+  **Secrets are never returned** — state is read as metadata only (an encrypted value is
+  never materialized, enforced at the SQL layer).
+- **Audit trail** (migration 7, new `audit_log` table): login, sync, reprovision, reveal
+  and purge are recorded as metadata only (no secrets, no raw PII), with its own retention.
+
+### New `createIntegrationApp` options
+
+- `adminPort` / `adminHost` — serve the admin surface on a **separate listener** (default
+  host `127.0.0.1`) so the public interface only exposes webhooks/inbound/health.
+- `adminSecureCookie` — mark the session cookie `Secure` (HTTPS-only) for real deployments.
+- `rejectedRetentionDays` (defaults to `retentionDays`) and `auditRetentionDays`
+  (default 365) — independent retention for the dead-letter and the audit trail.
+
+### Security posture
+
+- Loud startup warnings when the admin surface is exposed on a public `0.0.0.0` listener,
+  when the admin token is short (< 32 chars), or when `adminSecureCookie` is off.
+- Admin token comparison stays timing-safe (fixed-length HMAC digest) and per-IP
+  rate-limited. No dependency was added.
+
 ## 1.4.0
 
 Hardening release. **Everything is additive and backward compatible** — no public

@@ -120,6 +120,227 @@ describe('RunRepo.finish (unserializable summary)', () => {
   });
 });
 
+describe('InstallRepo.list + countByStatus (admin)', () => {
+  it('paginates, filters by status and by free-text q, and counts per status', () => {
+    const r = repos();
+    r.installs.upsert({ installation_id: 'inst_1', shop_domain: 'alpha.myshop.com', shop_name: 'Alpha', status: 'active' });
+    r.installs.upsert({ installation_id: 'inst_2', shop_domain: 'beta.myshop.com', shop_name: 'Beta', status: 'active' });
+    r.installs.upsert({ installation_id: 'inst_3', shop_domain: 'gamma.other.com', shop_name: 'Gamma', status: 'inactive' });
+
+    const all = r.installs.list({ limit: 50, offset: 0 });
+    expect(all.total).toBe(3);
+    expect(all.items).toHaveLength(3);
+
+    const active = r.installs.list({ status: 'active', limit: 50, offset: 0 });
+    expect(active.total).toBe(2);
+    expect(active.items.every((i) => i.status === 'active')).toBe(true);
+
+    const byQ = r.installs.list({ q: 'beta', limit: 50, offset: 0 });
+    expect(byQ.total).toBe(1);
+    expect(byQ.items[0]?.installation_id).toBe('inst_2');
+
+    const page = r.installs.list({ limit: 2, offset: 0 });
+    expect(page.items).toHaveLength(2);
+    expect(page.total).toBe(3); // total ignores the page window
+
+    expect(r.installs.countByStatus()).toEqual({ active: 2, inactive: 1 });
+  });
+
+  it('treats LIKE wildcards in the search term literally (escapes % and _)', () => {
+    const r = repos();
+    r.installs.upsert({ installation_id: 'has_underscore', shop_name: 'X', status: 'active' });
+    r.installs.upsert({ installation_id: 'plain', shop_name: 'Y', status: 'active' });
+    // Unescaped, q='_' would match every row (`_` = any char); escaped, only the literal underscore.
+    const res = r.installs.list({ q: '_', limit: 50, offset: 0 });
+    expect(res.total).toBe(1);
+    expect(res.items[0]?.installation_id).toBe('has_underscore');
+  });
+});
+
+describe('WebhookLogRepo (admin views)', () => {
+  it('listByInstallation paginates + filters by event/signature; counters + last event', () => {
+    const r = repos();
+    r.webhookLog.log({ event: 'installed', installation_id: 'inst', signature_ok: true, payload_json: '{"a":1}' });
+    r.webhookLog.log({ event: 'activated', installation_id: 'inst', signature_ok: true, payload_json: '{"a":2}' });
+    r.webhookLog.log({ event: 'activated', installation_id: 'inst', signature_ok: false, payload_json: '{"a":3}' });
+    r.webhookLog.log({ event: 'installed', installation_id: 'other', signature_ok: true, payload_json: '{}' });
+
+    const scoped = r.webhookLog.listByInstallation('inst', { limit: 50, offset: 0 });
+    expect(scoped.total).toBe(3); // 'other' excluded
+    expect(scoped.items[0]?.event).toBe('activated'); // newest first
+
+    const refusedOnly = r.webhookLog.listByInstallation('inst', { signatureOk: false, limit: 50, offset: 0 });
+    expect(refusedOnly.total).toBe(1);
+
+    const byEvent = r.webhookLog.listByInstallation('inst', { event: 'activated', limit: 50, offset: 0 });
+    expect(byEvent.total).toBe(2);
+
+    const since = r.webhookLog.countSince(24);
+    expect(since.total).toBe(4);
+    expect(since.refused).toBe(1);
+
+    expect(r.webhookLog.lastForInstallation('inst')?.event).toBe('activated');
+    expect(r.webhookLog.lastForInstallation('nobody')).toBeUndefined();
+  });
+});
+
+describe('WebhookSeenRepo.countByInstallationSince', () => {
+  it('counts retained signatures for an installation within the window', () => {
+    const db = openDatabase(':memory:');
+    const r = createRepositories(db, cipher);
+    r.webhookSeen.claim('inst', 'k1');
+    r.webhookSeen.claim('inst', 'k2');
+    r.webhookSeen.claim('other', 'k3');
+    db.prepare(`INSERT INTO webhook_seen (installation_id, dedup_key, created_at) VALUES ('inst','k-old', datetime('now','-30 days'))`).run();
+    expect(r.webhookSeen.countByInstallationSince('inst', 7)).toBe(2); // old one outside window
+    expect(r.webhookSeen.countByInstallationSince('other', 7)).toBe(1);
+  });
+});
+
+describe('RunRepo.list (admin)', () => {
+  it('paginates runs newest first with a total', () => {
+    const r = repos();
+    for (let i = 0; i < 5; i++) {
+      const id = r.runs.start('inst');
+      r.runs.finish(id, 'ok', { i });
+    }
+    const page = r.runs.list('inst', { limit: 2, offset: 0 });
+    expect(page.total).toBe(5);
+    expect(page.items).toHaveLength(2);
+    expect(JSON.parse(page.items[0]?.summary_json ?? '{}').i).toBe(4); // newest first
+  });
+});
+
+describe('RunRepo — clamp & retention', () => {
+  it('recent() clamps the caller limit to at most 200', () => {
+    const r = repos();
+    for (let i = 0; i < 205; i++) {
+      const id = r.runs.start('inst');
+      r.runs.finish(id, 'ok', { i });
+    }
+    expect(r.runs.recent('inst', 100000)).toHaveLength(200);
+  });
+
+  it('purgeOlderThan removes old runs, keeps recent', () => {
+    const db = openDatabase(':memory:');
+    const r = createRepositories(db, cipher);
+    const id = r.runs.start('inst');
+    r.runs.finish(id, 'ok', {});
+    db.prepare(`INSERT INTO sync_run (installation_id, status, started_at) VALUES ('inst','ok', datetime('now','-100 days'))`).run();
+    expect(r.runs.purgeOlderThan(30)).toBe(1);
+    expect(r.runs.recent('inst')).toHaveLength(1);
+  });
+});
+
+describe('IntegrationStateRepo.listMeta — SECURITY INVARIANT', () => {
+  it('never materializes the value of an ENCRYPTED row (preview NULL for secrets)', () => {
+    const r = repos();
+    r.state.set('inst', 'pref_lang', 'fr');
+    r.state.setSecret('inst', 'hiboutik_api_key', 'topsecret-должно-never-leak');
+
+    const meta = r.state.listMeta('inst');
+    const secret = meta.find((m) => m.key === 'hiboutik_api_key');
+    const plain = meta.find((m) => m.key === 'pref_lang');
+
+    // The encrypted secret: flagged, length exposed, but the VALUE never surfaces.
+    expect(secret?.encrypted).toBe(1);
+    expect(secret?.value_preview).toBeNull();
+    expect(secret?.value_length).toBeGreaterThan(0);
+    // Belt-and-suspenders: the plaintext secret must appear NOWHERE in the serialized meta.
+    expect(JSON.stringify(meta)).not.toContain('topsecret');
+
+    // A non-encrypted value is previewable.
+    expect(plain?.encrypted).toBe(0);
+    expect(plain?.value_preview).toBe('fr');
+  });
+
+  it('truncates a long PLAINTEXT preview to 200 chars while reporting the full length', () => {
+    const r = repos();
+    r.state.set('inst', 'big', 'x'.repeat(500));
+    const meta = r.state.listMeta('inst').find((m) => m.key === 'big');
+    expect(meta?.value_preview).toBe('x'.repeat(200));
+    expect(meta?.value_preview?.length).toBe(200);
+    expect(meta?.value_length).toBe(500);
+  });
+});
+
+describe('InboundEventRepo.listByInstallation (admin)', () => {
+  it('paginates inbound events scoped to the installation', () => {
+    const r = repos();
+    r.inboundEvents.claim('inst', 'idem-1', 'sync');
+    r.inboundEvents.claim('inst', 'idem-2', 'sync');
+    r.inboundEvents.claim('other', 'idem-3', 'sync');
+    const page = r.inboundEvents.listByInstallation('inst', { limit: 50, offset: 0 });
+    expect(page.total).toBe(2);
+    expect(page.items.every((e) => e.installation_id === 'inst')).toBe(true);
+  });
+});
+
+describe('RejectedItemRepo (admin filters + scoped delete)', () => {
+  it('list/count/countByEntity across installations and filters', () => {
+    const r = repos();
+    r.rejectedItems.add({ installation_id: 'inst', entity: 'orders', payload_json: '{"id":1}', reason: 'schema' });
+    r.rejectedItems.add({ installation_id: 'inst', entity: 'orders', payload_json: '{"id":2}', reason: 'schema' });
+    r.rejectedItems.add({ installation_id: 'inst', entity: 'customers', payload_json: '{"id":3}', reason: 'dup' });
+    r.rejectedItems.add({ installation_id: 'other', entity: 'orders', payload_json: '{"id":4}', reason: 'schema' });
+
+    expect(r.rejectedItems.count({})).toBe(4);
+    expect(r.rejectedItems.count({ installationId: 'inst' })).toBe(3);
+    expect(r.rejectedItems.count({ entity: 'orders' })).toBe(3);
+    expect(r.rejectedItems.list({ installationId: 'inst', entity: 'orders', limit: 50, offset: 0 }).total).toBe(2);
+    expect(r.rejectedItems.countByEntity('inst')).toEqual([
+      { entity: 'orders', n: 2 },
+      { entity: 'customers', n: 1 },
+    ]);
+  });
+
+  it('deleteByIds is SCOPED to the installation (never deletes another tenant rows)', () => {
+    const r = repos();
+    r.rejectedItems.add({ installation_id: 'inst', entity: 'orders', payload_json: '{"id":1}' });
+    r.rejectedItems.add({ installation_id: 'other', entity: 'orders', payload_json: '{"id":2}' });
+    const instRows = r.rejectedItems.list({ installationId: 'inst', limit: 50, offset: 0 }).items;
+    const otherRows = r.rejectedItems.list({ installationId: 'other', limit: 50, offset: 0 }).items;
+    const otherId = otherRows[0]!.id;
+
+    // Attempt to delete the OTHER tenant's row via inst's scope -> no-op.
+    expect(r.rejectedItems.deleteByIds('inst', [otherId])).toBe(0);
+    expect(r.rejectedItems.count({ installationId: 'other' })).toBe(1); // untouched
+
+    // Deleting inst's own row works.
+    expect(r.rejectedItems.deleteByIds('inst', [instRows[0]!.id])).toBe(1);
+    expect(r.rejectedItems.count({ installationId: 'inst' })).toBe(0);
+
+    // Empty / non-integer id lists are safe no-ops.
+    expect(r.rejectedItems.deleteByIds('other', [])).toBe(0);
+  });
+});
+
+describe('AuditRepo (append-only trail)', () => {
+  it('adds entries (metadata only) and lists newest first; purge by age', () => {
+    const db = openDatabase(':memory:');
+    const r = createRepositories(db, cipher);
+    r.audit.add({ action: 'login', ip: '10.0.0.1' });
+    r.audit.add({ action: 'sync', installation_id: 'inst', target: 'inst', details: { full: true } });
+    const page = r.audit.list({ limit: 50, offset: 0 });
+    expect(page.total).toBe(2);
+    expect(page.items[0]?.action).toBe('sync'); // newest first
+    expect(JSON.parse(page.items[0]?.details_json ?? '{}').full).toBe(true);
+
+    // Backdate one row and purge older than 30 days.
+    db.prepare(`UPDATE audit_log SET at = datetime('now','-100 days') WHERE action = 'login'`).run();
+    expect(r.audit.purgeOlderThan(30)).toBe(1);
+    expect(r.audit.list({ limit: 50, offset: 0 }).total).toBe(1);
+  });
+
+  it('never throws on an unserializable details payload', () => {
+    const r = repos();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(() => r.audit.add({ action: 'x', details: circular })).not.toThrow();
+    expect(r.audit.list({ limit: 10, offset: 0 }).items[0]?.details_json).toBeNull();
+  });
+});
+
 describe('Retention (purgeOlderThan)', () => {
   it('purges webhook_log / webhook_seen / inbound_event rows older than N days, keeps recent ones', () => {
     const r = repos();

@@ -161,6 +161,85 @@ describe('HTTP runtime (server.inject)', () => {
     await app.stop();
   });
 
+  it('J4: adminPort moves the admin surface OFF the public listener', async () => {
+    const token = 'a'.repeat(40);
+    const app = createIntegrationApp(integration, {
+      databasePath: ':memory:',
+      webhookSecret: 'whsec',
+      credentialsKey: randomBytes(32).toString('hex'),
+      adminToken: token,
+      adminPort: 9931,
+      autoBackfillOnActivate: false,
+      autoSync: false,
+      logger: createLogger({ sink: () => {} }),
+    });
+    // Public server keeps /health but no longer answers /admin/* (moved to the admin listener).
+    expect((await app.server.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
+    const admin = await app.server.inject({ method: 'GET', url: '/admin/meta', headers: { 'x-admin-token': token } });
+    expect(admin.statusCode).toBe(404);
+    // …and the dedicated admin listener IS where /admin now lives and answers.
+    expect(app.adminServer).toBeDefined();
+    const onAdmin = await app.adminServer!.inject({ method: 'GET', url: '/admin/meta', headers: { 'x-admin-token': token } });
+    expect(onAdmin.statusCode).toBe(200);
+    await app.stop();
+  });
+
+  it('J4: single-listener (default) keeps /admin on the public server', async () => {
+    const token = 'a'.repeat(40);
+    const app = makeTestApp(integration, { adminToken: token });
+    const admin = await app.server.inject({ method: 'GET', url: '/admin/meta', headers: { 'x-admin-token': token } });
+    expect(admin.statusCode).toBe(200);
+    await app.stop();
+  });
+
+  it('J4: adminSecureCookie marks the session cookie Secure', async () => {
+    const token = 'a'.repeat(40);
+    const app = createIntegrationApp(integration, {
+      databasePath: ':memory:',
+      webhookSecret: 'whsec',
+      credentialsKey: randomBytes(32).toString('hex'),
+      adminToken: token,
+      adminSecureCookie: true,
+      autoBackfillOnActivate: false,
+      autoSync: false,
+      logger: createLogger({ sink: () => {} }),
+    });
+    const res = await app.server.inject({ method: 'POST', url: '/admin/session', payload: JSON.stringify({ token }) });
+    expect(res.statusCode).toBe(200);
+    expect(String((res.headers['set-cookie'] as string[])[0])).toContain('Secure');
+    await app.stop();
+  });
+
+  it('reprovision refuses (busy) while a sync holds the per-installation lock', async () => {
+    const token = 'a'.repeat(40);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const c = defineIntegration({
+      slug: 'demo-repro',
+      meta: { name: 'Repro', version: '1.0.0' },
+      configSchema: { fields: [{ key: 'token', type: 'password', sensitive: true, label: { fr: 'T' } }] },
+      parseSettings: () => ({ ok: true }),
+      testConnection: async () => true,
+      provisioning: () => ({ dataSources: [] }),
+      syncSteps: [
+        { entity: 'x', cursorScope: 'global', enabled: () => true, run: async () => { await gate; return { items: 0, errors: [] }; } },
+      ],
+    });
+    const app = makeTestApp(c, { adminToken: token });
+    app.repos.installs.upsert({ installation_id: '1', status: 'active' });
+    app.repos.state.setSecret('1', '__access_token', 'int_T');
+
+    const syncing = app.runSyncOnce('1', { full: false }); // holds the lock (step awaits the gate)
+    const res = await app.server.inject({ method: 'POST', url: '/admin/installations/1/reprovision', headers: { 'x-admin-token': token } });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.payload).error).toContain('busy');
+    release();
+    await syncing;
+    await app.stop();
+  });
+
   it('runSyncOnce: per-installation overlap lock', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });

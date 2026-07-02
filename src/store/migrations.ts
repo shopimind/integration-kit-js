@@ -169,4 +169,41 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_rejected_item_install ON rejected_item(installation_id, created_at);
     `,
   },
+  {
+    version: 7,
+    name: 'admin_audit',
+    sql: `
+      -- Audit trail of ADMIN actions performed through the admin API / operations UI
+      -- (login, sync, reprovision, purge, PII reveal). Append-only, with its own
+      -- retention (auditRetentionDays, default 365). Metadata ONLY: no secrets, no raw
+      -- PII — 'details_json' holds counts/ids/flags, never customer data.
+      CREATE TABLE audit_log (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        at               TEXT NOT NULL DEFAULT (datetime('now')),
+        action           TEXT NOT NULL,
+        installation_id  TEXT,
+        target           TEXT,
+        details_json     TEXT,
+        ip               TEXT
+      );
+      CREATE INDEX idx_audit_log_at ON audit_log(at);
+    `,
+  },
+  {
+    version: 8,
+    name: 'admin_query_indexes',
+    sql: `
+      -- Composite (installation_id, id) indexes so the admin per-installation lists
+      -- (filter by installation_id, ORDER BY id DESC) read in reverse index order with
+      -- no filesort, plus time indexes so the retention purges and the dashboard's
+      -- time-window counters do not full-table-scan as the tables grow.
+      CREATE INDEX idx_webhook_log_install_id   ON webhook_log(installation_id, id);
+      CREATE INDEX idx_webhook_log_created      ON webhook_log(created_at);
+      CREATE INDEX idx_inbound_event_install_id ON inbound_event(installation_id, id);
+      CREATE INDEX idx_inbound_event_received   ON inbound_event(received_at);
+      CREATE INDEX idx_sync_run_install_id      ON sync_run(installation_id, id);
+      CREATE INDEX idx_rejected_item_install_id ON rejected_item(installation_id, id);
+      CREATE INDEX idx_webhook_seen_created     ON webhook_seen(created_at);
+    `,
+  },
 ];

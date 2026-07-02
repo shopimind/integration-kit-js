@@ -91,3 +91,24 @@ export interface RejectedItemRow {
   reason: string | null;
   created_at: string;
 }
+
+/** A row of the lifecycle webhook log. `payload_json` is already redacted at write time. */
+export interface WebhookLogRow {
+  id: number;
+  event: string | null;
+  installation_id: string | null;
+  signature_ok: number;
+  payload_json: string | null;
+  created_at: string;
+}
+
+/** A row of the admin audit trail. Metadata only: no secrets, no raw PII. */
+export interface AuditRow {
+  id: number;
+  at: string;
+  action: string;
+  installation_id: string | null;
+  target: string | null;
+  details_json: string | null;
+  ip: string | null;
+}
