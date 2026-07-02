@@ -17,6 +17,13 @@ import { shouldAdvanceCursor } from './cursor.js';
 export interface SyncOptions {
   fullBackfill?: boolean;
   backfillDays?: number;
+  /**
+   * Defensive OVERLAP (E9): on an incremental window, shift `since` back by this many
+   * seconds so an event that landed exactly on the previous cursor boundary (or a
+   * source with slightly skewed clocks) is not missed. Harmless: re-fetched items are
+   * idempotent on the ShopiMind side (bulkSave upserts). 0/undefined -> no overlap.
+   */
+  overlapSeconds?: number;
   /** Injectable for testing; defaults to `() => new Date()`. */
   now?: () => Date;
 }
@@ -126,6 +133,7 @@ export async function runIntegrationSync<S>(
   const now = opts.now ?? ((): Date => new Date());
   const backfillDays = opts.backfillDays ?? 365;
   const full = opts.fullBackfill ?? false;
+  const overlapSeconds = opts.overlapSeconds ?? 0;
 
   const runId = deps.runs.start(base.installationId);
   const summary: SyncSummary = { runId, status: 'ok', steps: [], errors: [] };
@@ -147,6 +155,7 @@ export async function runIntegrationSync<S>(
           now,
           full,
           backfillDays,
+          overlapSeconds,
           runId,
           deadLetterBudget,
         });
@@ -186,6 +195,7 @@ async function runOneSource<S>(
     now: () => Date;
     full: boolean;
     backfillDays: number;
+    overlapSeconds: number;
     runId: number;
     deadLetterBudget: { remaining: number };
   },
@@ -355,10 +365,15 @@ function safeJson(v: unknown): string {
   }
 }
 
-/** Sync window: backfill on the first run / in full mode, otherwise from the cursor. */
+/**
+ * Sync window: backfill on the first run / in full mode, otherwise from the cursor.
+ * On an incremental window, `overlapSeconds` (E9) shifts `since` back defensively so
+ * an item on the previous boundary is not missed (re-fetches are idempotent upserts).
+ * A backfill window is NOT shifted — it already starts far in the past.
+ */
 export function computeWindow(
   lastSyncedAt: string | null,
-  opts: { now: () => Date; full: boolean; backfillDays: number },
+  opts: { now: () => Date; full: boolean; backfillDays: number; overlapSeconds?: number },
 ): SyncWindow {
   const until = opts.now();
   if (opts.full || !lastSyncedAt) {
@@ -366,7 +381,10 @@ export function computeWindow(
     since.setDate(since.getDate() - opts.backfillDays);
     return { since, until };
   }
-  return { since: new Date(lastSyncedAt), until };
+  const since = new Date(lastSyncedAt);
+  const overlap = opts.overlapSeconds ?? 0;
+  if (overlap > 0) since.setTime(since.getTime() - overlap * 1000);
+  return { since, until };
 }
 
 function errMsg(e: unknown): string {

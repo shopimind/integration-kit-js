@@ -45,6 +45,12 @@ export interface CreateAppOptions<S> {
   adminToken?: string | null;
   signatureToleranceSeconds?: number;
   backfillDays?: number;
+  /**
+   * Defensive overlap (E9) applied to every INCREMENTAL sync window: shifts `since`
+   * back by this many seconds so a boundary item is not missed. Idempotent (upserts).
+   * Default 0 (no overlap).
+   */
+  overlapSeconds?: number;
   port?: number;
   host?: string;
   logger?: Logger;
@@ -151,7 +157,11 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
           // E4 — feed the dead-letter sink so rejected items survive the run.
           rejectedItems: repos.rejectedItems,
         },
-        { fullBackfill: o?.full ?? false, backfillDays },
+        {
+          fullBackfill: o?.full ?? false,
+          backfillDays,
+          ...(opts.overlapSeconds != null ? { overlapSeconds: opts.overlapSeconds } : {}),
+        },
       );
     } finally {
       running.delete(id);

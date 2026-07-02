@@ -495,4 +495,14 @@ describe('computeWindow', () => {
     const w = computeWindow('2026-06-10T00:00:00.000Z', { now: () => at, full: false, backfillDays: 30 });
     expect(w.since?.toISOString()).toBe('2026-06-10T00:00:00.000Z');
   });
+
+  it('E9: applies overlapSeconds to an incremental window (shifts since back)', () => {
+    const w = computeWindow('2026-06-10T00:00:00.000Z', { now: () => at, full: false, backfillDays: 30, overlapSeconds: 120 });
+    expect(w.since?.toISOString()).toBe('2026-06-09T23:58:00.000Z'); // 2 minutes earlier
+  });
+
+  it('E9: does NOT shift a backfill window', () => {
+    const w = computeWindow(null, { now: () => at, full: false, backfillDays: 30, overlapSeconds: 120 });
+    expect(w.since?.toISOString()).toBe('2026-05-22T00:00:00.000Z'); // unchanged backfill start
+  });
 });

@@ -51,6 +51,7 @@ export * from './logging/logger.js';
 
 // Integration authoring contract
 export * from './integration/define-integration.js';
+export * from './integration/define-bulk-step.js';
 export type * from './integration/types.js';
 
 // Neutral integration manifest (describes the integration in a portable way)
