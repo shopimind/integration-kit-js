@@ -4,9 +4,11 @@ All notable changes to `@shopimind/integration-kit-js` are documented here.
 This project follows [Semantic Versioning](https://semver.org/): `patch` = fix,
 `minor` = backward-compatible addition, `major` = breaking change.
 
-## 1.5.1
+## 1.6.0
 
-Operations console (`/admin/ui`) UI/UX overhaul — no API, behavior or contract change.
+Operations console (`/admin/ui`) overhaul, plus an integration **Definition** view.
+
+### Admin UI
 
 - **Redesigned interface**: icon navigation, clearer typography and spacing, status /
   run badges, proportion bars, loading skeletons, empty states, light & dark themes.
@@ -14,11 +16,18 @@ Operations console (`/admin/ui`) UI/UX overhaul — no API, behavior or contract
   reprovision, purge, payload reveal, logout).
 - **Contextual help**: inline tooltips explaining each metric, table column and action.
 - **Payloads** are pretty-printed in a collapsible, bordered box (expand / audited
-  reveal) instead of an overflowing raw blob; long installation ids are shortened with a
-  full-value tooltip.
+  reveal) instead of an overflowing raw blob; long ids are shortened with a tooltip.
+- The sidebar shows the **integration's name** over "Intégration ShopiMind".
 
-Patch release: `dist` only (the embedded UI). No dependency, migration or contract change,
-so upgrading from `1.5.0` is a drop-in.
+### Additive API
+
+- **`GET /admin/definition`** — returns what the integration declares (meta, config
+  schema, sync steps, widgets, inbound routes, hooks, capabilities), backing the new
+  **Definition** page. Declarations only — no function bodies are exposed.
+- **`GET /admin/meta`** now also carries the integration identity (`{ name, slug, version }`).
+
+Backward compatible — additive only, no dependency, migration or contract change.
+Upgrading from `1.5.x` is a drop-in.
 
 ## 1.5.0
 

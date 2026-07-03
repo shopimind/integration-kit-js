@@ -74,6 +74,9 @@
       .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; padding: 4px 8px 20px; }
       .brand .logo { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--brand), #9b6bff); display: grid; place-items: center; box-shadow: 0 2px 8px var(--brand-bg); }
       .brand .logo svg { width: 16px; height: 16px; color: #fff; }
+      .brandtext { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+      .brandtext .bn { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .brandtext .bs { font-size: 11px; color: var(--muted); font-weight: 500; white-space: nowrap; }
       .nav { display: flex; flex-direction: column; gap: 2px; }
       .nav a { display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: var(--r-sm); color: var(--muted); font-weight: 550; position: relative; }
       .nav a svg { width: 18px; height: 18px; }
@@ -378,7 +381,7 @@
         }, [input, btn, err]);
         root.appendChild(el('div', { class: 'login' }, [
           el('div', { class: 'box' }, [
-            el('div', { class: 'brand', style: 'padding:0' }, [el('span', { class: 'logo' }, [ico('spark')]), el('span', { text: 'ShopiMind' })]),
+            el('div', { class: 'brand', style: 'padding:0 0 4px' }, [el('span', { class: 'logo' }, [ico('spark')]), el('span', { text: 'ShopiMind' })]),
             el('h1', { text: 'Console d’exploitation' }),
             el('p', { text: 'Espace d’exploitation local de cette intégration. Aucune donnée ne quitte votre infrastructure.' }),
             form,
@@ -390,16 +393,29 @@
       // ================================================================= shell
       const NAV = [
         { id: 'dashboard', label: 'Tableau de bord', icon: 'grid' },
+        { id: 'definition', label: 'Définition', icon: 'box' },
         { id: 'installations', label: 'Installations', icon: 'plug' },
         { id: 'rejected', label: 'Rejets', icon: 'alert' },
         { id: 'audit', label: 'Journal d’audit', icon: 'clipboard' },
       ];
+      // Brand block: the integration's name over "Intégration ShopiMind" (falls back to
+      // the generic branding until the identity is loaded from /admin/meta).
+      function brandBlock() {
+        const integ = state.integration;
+        const name = integ && integ.name ? integ.name : 'ShopiMind';
+        const sub = integ && integ.name ? 'Intégration ShopiMind' : 'Console d’exploitation';
+        return el('div', { class: 'brand' }, [
+          el('span', { class: 'logo' }, [ico('spark')]),
+          el('div', { class: 'brandtext' }, [el('span', { class: 'bn', text: name }), el('span', { class: 'bs', text: sub })]),
+        ]);
+      }
+      function setTitle() { const n = state.integration && state.integration.name; document.title = (n ? n + ' — ' : '') + 'Console ShopiMind'; }
       function shell(title, sub, body, actions) {
         const root = clear($('#root'));
         const nav = el('nav', { class: 'nav' }, NAV.map((it) =>
           el('a', { href: '#' + it.id, class: state.view === it.id ? 'active' : '', onclick: (e) => { e.preventDefault(); go(it.id); } }, [ico(it.icon), el('span', { text: it.label })])));
         const side = el('aside', { class: 'side' }, [
-          el('div', { class: 'brand' }, [el('span', { class: 'logo' }, [ico('spark')]), el('span', { text: 'ShopiMind' })]),
+          brandBlock(),
           nav,
           el('div', { class: 'foot' }, [
             el('div', { class: 'ver', id: 'kitver', text: '' }),
@@ -494,6 +510,8 @@
         shell('Tableau de bord', 'Vue d’ensemble de l’intégration', el('div', { class: 'grid' }, [1, 2, 3].map(() => el('div', { class: 'card stat' }, [el('span', { class: 'skel', style: 'width:50%' }), el('span', { class: 'skel', style: 'width:30%;height:24px;margin-top:10px' })]))));
         const m = await api('/admin/meta');
         state.kitVersion = m.kitVersion;
+        state.integration = m.integration;
+        setTitle();
         const byStatus = m.installations.byStatus || {};
         const statusStr = Object.keys(byStatus).map((k) => k + ': ' + byStatus[k]).join(' · ') || 'aucune';
         const cards = el('div', { class: 'grid' }, [
@@ -679,11 +697,61 @@
         ]));
       }
 
+      // ================================================================= definition
+      function loc(x) { if (x == null) return '—'; if (typeof x === 'string') return x; return x.fr || x.en || Object.values(x)[0] || '—'; }
+      function collectFields(cs) { const out = []; if (!cs) return out; (cs.steps || []).forEach((s) => (s.fields || []).forEach((f) => out.push(f))); (cs.groups || []).forEach((g) => (g.fields || []).forEach((f) => out.push(f))); (cs.fields || []).forEach((f) => out.push(f)); return out; }
+      function capPill(label, val) { const on = !!val; return el('span', { class: 'badge ' + (on ? 'ok' : '') }, [on ? el('span', { class: 'dot' }) : null, el('span', { text: label + (typeof val === 'number' && val ? ' (' + val + ')' : '') })]); }
+      function tolText(t) { if (!t) return 'non — curseur bloqué'; if (t === true) return 'oui'; return 'ratio ≤ ' + t.maxRatio; }
+      function pillList(items) { return el('div', { class: 'card pad' }, [el('div', { class: 'row', style: 'gap:8px' }, items.map((i) => el('span', { class: 'badge mono', text: i })))]); }
+
+      async function renderDefinition() {
+        shell('Définition de l’intégration', 'Ce que déclare cette intégration', el('div', {}, [tableCard(['', '', ''], [], { loading: 4 })]));
+        const d = await api('/admin/definition');
+        state.integration = { name: d.meta.name, slug: d.slug, version: d.meta.version };
+        setTitle();
+        const cap = d.capabilities;
+        const idCard = el('div', { class: 'card pad' }, [
+          el('div', { class: 'row' }, [el('span', { class: 'mono', style: 'font-size:13px', text: d.slug }), badge('v' + d.meta.version, 'brand')].concat((d.meta.categories || []).map((c) => badge(c)))),
+          d.meta.description || d.meta.short_description ? el('p', { class: 'muted', style: 'margin-top:12px', text: d.meta.description || d.meta.short_description }) : null,
+          el('div', { class: 'kv', style: 'margin-top:16px' }, [
+            el('div', { class: 'k' }, ['Nom']), el('div', { class: 'v', text: d.meta.name }),
+            el('div', { class: 'k' }, ['Slug']), el('div', { class: 'v mono', text: d.slug }),
+            el('div', { class: 'k' }, ['Version']), el('div', { class: 'v', text: d.meta.version }),
+            el('div', { class: 'k' }, ['Catégories']), el('div', { class: 'v', text: (d.meta.categories || []).join(', ') || '—' }),
+            el('div', { class: 'k' }, ['Auth externe', tip('L’intégration exige-t-elle une authentification externe (OAuth) ?')]), el('div', { class: 'v', text: d.meta.requires_external_auth ? 'requise (OAuth)' : 'non' }),
+          ].concat(d.meta.documentation_url ? [el('div', { class: 'k' }, ['Documentation']), el('div', { class: 'v' }, [el('a', { href: d.meta.documentation_url, target: '_blank', rel: 'noopener noreferrer', text: d.meta.documentation_url })])] : [])),
+        ]);
+        const caps = el('div', { class: 'row', style: 'gap:8px' }, [
+          capPill('Provisioning', cap.provisioning), capPill('Test de connexion', cap.testConnection),
+          capPill('Données distantes', d.remoteData.length), capPill('Widgets', d.widgets.length),
+          capPill('Routes entrantes', d.inbound.length), capPill('Hooks', d.hooks.length),
+        ]);
+        const fields = collectFields(d.configSchema);
+        const cfgTable = tableCard(
+          [th('Clé'), th('Type'), th('Libellé'), th('Requis'), th('Sensible', TIPS.encrypted), th('Propriétaire')],
+          fields.map((f) => [el('span', { class: 'mono', text: f.key }), badge(f.type), loc(f.label), f.required ? 'oui' : '—', f.sensitive ? badge('chiffré', 'brand') : '—', f.owner || 'merchant']),
+          { emptyText: 'Aucun champ de configuration déclaré.' });
+        const stepsTable = tableCard(
+          [th('Entité'), th('Portée curseur', TIPS.cursor), th('Condition'), th('Tolère les rejets', 'Si vrai/ratio, le curseur peut avancer malgré des rejets (flux fenêtré) ; sinon les rejets bloquent le curseur.')],
+          (d.syncSteps || []).map((s) => [s.entity, s.cursorScope, s.guarded ? 'conditionnelle' : 'toujours', tolText(s.tolerateRejects)]),
+          { emptyText: 'Aucune étape de synchronisation déclarée.' });
+        const extras = [];
+        if (d.inbound.length) extras.push(el('div', { class: 'section-title' }, ['Routes entrantes', tip('Routes que VOTRE application appelle en temps réel — POST /inbound/{action}, signées par installation.')]), pillList(d.inbound.map((a) => 'POST /inbound/' + a)));
+        if (d.hooks.length) extras.push(el('div', { class: 'section-title' }, ['Hooks de cycle de vie']), pillList(d.hooks));
+        if (d.widgets.length) extras.push(el('div', { class: 'section-title' }, ['Widgets']), tableCard([th('Clé'), th('Nom'), th('Rendu'), th('Cibles')], d.widgets.map((w) => [el('span', { class: 'mono', text: w.key }), loc(w.name), w.render_type, (w.targets || []).join(', ')]), {}));
+        shell('Définition de l’intégration', d.meta.name + ' · ' + d.slug, el('div', {}, [
+          idCard,
+          el('div', { class: 'section-title' }, ['Capacités']), caps,
+          el('div', { class: 'section-title' }, ['Schéma de configuration', tip('Le formulaire présenté au marchand pour configurer l’intégration.')]), cfgTable,
+          el('div', { class: 'section-title' }, ['Étapes de synchronisation', tip(TIPS.cursor)]), stepsTable,
+        ].concat(extras)));
+      }
+
       // ================================================================= router
       function go(view, id) {
         state.view = view === 'installation' ? 'installations' : view;
         if (view === 'installation') { state.instId = id; state.tab = 'overview'; }
-        const run = { dashboard: renderDashboard, installations: renderInstallations, installation: () => renderInstallation(id), rejected: renderRejected, audit: renderAudit }[view] || renderDashboard;
+        const run = { dashboard: renderDashboard, definition: renderDefinition, installations: renderInstallations, installation: () => renderInstallation(id), rejected: renderRejected, audit: renderAudit }[view] || renderDashboard;
         Promise.resolve().then(run).catch((e) => { if (e.message !== 'unauthorized') toast('Erreur : ' + e.message, 'err'); });
       }
 

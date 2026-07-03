@@ -21,6 +21,7 @@ import { buildAdminRoutes } from '../http/admin-routes.js';
 import { AdminSessionManager } from '../http/admin-session.js';
 import { buildAdminData } from './admin-data.js';
 import { buildAdminActions } from './admin-actions.js';
+import { describeIntegration } from '../integration/describe.js';
 import { KIT_VERSION } from './kit-version.js';
 
 export interface CreateAppOptions<S> {
@@ -265,7 +266,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
   const publicPort = opts.port ?? 8080;
   const server = createServer({ port: publicPort, ...(opts.host ? { host: opts.host } : {}) });
   const nowMs = (): number => (opts.now ? opts.now() : Date.now());
-  const adminData = buildAdminData(repos, { kitVersion: KIT_VERSION, now: nowMs });
+  const adminData = buildAdminData(repos, { kitVersion: KIT_VERSION, now: nowMs, integration: describeIntegration(integration) });
   const adminActions = buildAdminActions(repos, { reprovision });
   const adminSessions = new AdminSessionManager({ now: nowMs, secureCookie: opts.adminSecureCookie ?? false });
 

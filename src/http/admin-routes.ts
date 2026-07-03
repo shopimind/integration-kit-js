@@ -199,6 +199,16 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
         return h.response(deps.data.meta()).code(200);
       },
     },
+    // ---- Read: integration definition (what the integration declares) --------
+    {
+      method: 'GET',
+      path: '/admin/definition',
+      handler: (req: Request, h: ResponseToolkit) => {
+        const no = denied(req, h, deps);
+        if (no) return no;
+        return h.response(deps.data.definition()).code(200);
+      },
+    },
     // ---- Read: installations list -------------------------------------------
     {
       method: 'GET',

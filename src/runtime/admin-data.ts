@@ -1,4 +1,5 @@
 import type { Repositories } from '../store/repositories.js';
+import type { IntegrationDescriptor } from '../integration/describe.js';
 import { maskPiiJson } from '../security/pii-mask.js';
 import type {
   InstallRow,
@@ -35,6 +36,7 @@ export type StateMeta = ReturnType<Repositories['state']['listMeta']>;
 export interface AdminMeta {
   kitVersion: string;
   generatedAt: string;
+  integration: { name: string; slug: string; version: string };
   installations: { total: number; byStatus: Record<string, number> };
   webhooks24h: { total: number; refused: number };
   rejected: { total: number; byEntity: Array<{ entity: string | null; n: number }> };
@@ -82,9 +84,13 @@ export interface AdminData {
   state(id: string): StateMeta;
   rejected(f: RejectedFilter): Page<RejectedItemRow>;
   audit(f: PageFilter): Page<AuditRow>;
+  definition(): IntegrationDescriptor;
 }
 
-export function buildAdminData(repos: Repositories, env: { kitVersion: string; now: () => number }): AdminData {
+export function buildAdminData(
+  repos: Repositories,
+  env: { kitVersion: string; now: () => number; integration: IntegrationDescriptor },
+): AdminData {
   const maskWebhooks = (p: Page<WebhookLogRow>): Page<WebhookLogRow> => ({
     total: p.total,
     items: p.items.map((w) => ({ ...w, payload_json: maskPiiJson(w.payload_json) })),
@@ -101,6 +107,7 @@ export function buildAdminData(repos: Repositories, env: { kitVersion: string; n
       return {
         kitVersion: env.kitVersion,
         generatedAt: new Date(env.now()).toISOString(),
+        integration: { name: env.integration.meta.name, slug: env.integration.slug, version: env.integration.meta.version },
         installations: { total, byStatus },
         webhooks24h: repos.webhookLog.countSince(24),
         rejected: { total: repos.rejectedItems.count({}), byEntity: repos.rejectedItems.countByEntity() },
@@ -142,6 +149,9 @@ export function buildAdminData(repos: Repositories, env: { kitVersion: string; n
     },
     audit(f) {
       return repos.audit.list(f);
+    },
+    definition() {
+      return env.integration;
     },
   };
 }

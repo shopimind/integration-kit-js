@@ -3,11 +3,23 @@ import { openDatabase } from '../store/db.js';
 import { createRepositories, type Repositories } from '../store/repositories.js';
 import { SecretCipher } from '../security/crypto.js';
 import { buildAdminData } from './admin-data.js';
+import { describeIntegration } from '../integration/describe.js';
+import { defineIntegration } from '../integration/define-integration.js';
 
 const cipher = new SecretCipher({ key: 'c'.repeat(64) });
+const DEMO = describeIntegration(
+  defineIntegration({
+    slug: 'demo',
+    meta: { name: 'Demo', version: '1.0.0' },
+    configSchema: { fields: [] },
+    parseSettings: () => ({}),
+    testConnection: async () => true,
+    syncSteps: [],
+  }),
+);
 const setup = (): { repos: Repositories; data: ReturnType<typeof buildAdminData> } => {
   const repos = createRepositories(openDatabase(':memory:'), cipher);
-  const data = buildAdminData(repos, { kitVersion: '9.9.9', now: () => 1_700_000_000_000 });
+  const data = buildAdminData(repos, { kitVersion: '9.9.9', now: () => 1_700_000_000_000, integration: DEMO });
   return { repos, data };
 };
 

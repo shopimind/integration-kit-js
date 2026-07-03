@@ -50,6 +50,22 @@ describe('GET /admin/meta', () => {
     expect(body.installations.total).toBe(1);
     expect(body).toHaveProperty('kitVersion');
     expect(body).toHaveProperty('webhooks24h');
+    expect(body.integration).toEqual({ name: 'Demo', slug: 'demo', version: '1.0.0' });
+    await app.stop();
+  });
+});
+
+describe('GET /admin/definition', () => {
+  it('401 without token; returns the integration definition with the token', async () => {
+    const app = makeTestApp(integration, { adminToken: TOKEN });
+    expect((await app.server.inject({ method: 'GET', url: '/admin/definition' })).statusCode).toBe(401);
+    const res = await app.server.inject({ method: 'GET', url: '/admin/definition', headers: auth });
+    expect(res.statusCode).toBe(200);
+    const d = JSON.parse(res.payload);
+    expect(d.slug).toBe('demo');
+    expect(d.meta.name).toBe('Demo');
+    expect(Array.isArray(d.syncSteps)).toBe(true);
+    expect(d).toHaveProperty('capabilities');
     await app.stop();
   });
 });
