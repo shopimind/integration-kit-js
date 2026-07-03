@@ -28,7 +28,7 @@ export interface CreateAppOptions<S> {
   databasePath: string;
   /**
    * Webhook signing secret(s). A single string is the common case; pass an array to
-   * open a secret ROTATION window (E6) — a webhook signed with ANY listed secret is
+   * open a secret ROTATION window — a webhook signed with ANY listed secret is
    * accepted while you swap `current` -> `next`. Backward compatible with a string.
    */
   webhookSecret: string | string[];
@@ -53,7 +53,7 @@ export interface CreateAppOptions<S> {
   signatureToleranceSeconds?: number;
   backfillDays?: number;
   /**
-   * Defensive overlap (E9) applied to every INCREMENTAL sync window: shifts `since`
+   * Defensive overlap applied to every INCREMENTAL sync window: shifts `since`
    * back by this many seconds so a boundary item is not missed. Idempotent (upserts).
    * Default 0 (no overlap).
    */
@@ -77,7 +77,7 @@ export interface CreateAppOptions<S> {
    */
   retentionDays?: number;
   /**
-   * Retention (in DAYS) for the E4 dead-letter (`rejected_item`). Defaults to
+   * Retention (in DAYS) for the dead-letter (`rejected_item`). Defaults to
    * `retentionDays`. Raise it to keep refused items longer for forensics.
    */
   rejectedRetentionDays?: number;
@@ -191,7 +191,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
           runs: repos.runs,
           makeSource: (sb) => makeWithSource(repos.state, id, PROVISIONING_KEY, sb),
           makeCustomData: (sb) => makeCustomData(repos.state, id, PROVISIONING_KEY, sb, base.spm),
-          // E4 — feed the dead-letter sink so rejected items survive the run.
+          // Feed the dead-letter sink so rejected items survive the run.
           rejectedItems: repos.rejectedItems,
         },
         {
@@ -273,7 +273,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
   const publicRoutes = buildRoutes({
     dispatcher,
     webhookRateLimit,
-    // E5 — enriched health probe (DB ping, run ages, cursors in error).
+    // Enriched health probe (DB ping, run ages, cursors in error).
     healthReport: () => buildHealthReport(db, repos, nowMs()),
     inbound: {
       integration,
@@ -291,9 +291,9 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
     data: adminData,
     sessions: adminSessions,
     actions: adminActions,
-    // E5 — admin overview across installations.
+    // Admin overview across installations.
     overview: () => buildOverview(repos, nowMs()),
-    // E4 — dead-lettered rejects for one installation (bounded, RAW payloads, operator-only).
+    // Dead-lettered rejects for one installation (bounded, RAW payloads, operator-only).
     rejectedItems: (id, limit) => repos.rejectedItems.listByInstallation(id, limit),
     runSyncForInstall: (id, full) => runSyncOnce(id, { full }),
     recentRuns: (id) => repos.runs.recent(id),

@@ -18,7 +18,7 @@ import type {
  *
  *   1. PII in webhook / rejected payloads is MASKED before it leaves the store
  *      (`maskPiiJson`); the un-masked payload is only ever exposed by the separate,
- *      audited "reveal" action (J3).
+ *      audited "reveal" action.
  *   2. Encrypted secrets are never materialized: state is read via `listMeta`,
  *      which the SQL layer guarantees never returns an encrypted `value`.
  *

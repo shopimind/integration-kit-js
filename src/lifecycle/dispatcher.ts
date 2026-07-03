@@ -46,7 +46,7 @@ export interface DispatcherDeps<S> {
   repos: Repositories;
   /**
    * Webhook signing secret(s). A single string is the common case; an array opens a
-   * rotation window (E6) where a request signed with ANY listed secret passes —
+   * rotation window where a request signed with ANY listed secret passes —
    * used while swapping `current` -> `next`. Backward compatible with a plain string.
    */
   secret: string | string[];
@@ -104,7 +104,7 @@ export async function handleWebhook<S>(
   headers: Record<string, string | string[] | undefined>,
   deps: DispatcherDeps<S>,
 ): Promise<HttpResult> {
-  // E6 — verify against one or several secrets (rotation window).
+  // Verify against one or several secrets (rotation window).
   const sig = verifyShopimindSignatureMulti(rawBody, headers, deps.secret, {
     ...(deps.toleranceSeconds != null ? { toleranceSeconds: deps.toleranceSeconds } : {}),
     ...(deps.now ? { now: deps.now } : {}),

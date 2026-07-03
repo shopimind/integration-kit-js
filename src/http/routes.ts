@@ -19,7 +19,7 @@ export interface RouteDeps<S> {
    */
   webhookRateLimit?(key: string): boolean;
   /**
-   * E5 — enriched health snapshot (DB ping, run ages, cursors in error). Routes
+   * Enriched health snapshot (DB ping, run ages, cursors in error). Routes
    * only reads `status` (to pick 200 vs 503) and forwards the whole object as JSON.
    */
   healthReport?(): { status: 'ok' | 'degraded' };
@@ -116,9 +116,9 @@ export function buildRoutes<S>(deps: RouteDeps<S>): ServerRoute[] {
       method: 'GET',
       path: '/health',
       handler: (_req: Request, h: ResponseToolkit) => {
-        // E5 — enriched health: DB ping + last-run age per active installation +
+        // Enriched health: DB ping + last-run age per active installation +
         // cursors in error. A degraded snapshot returns 503 so an orchestrator's
-        // readiness/liveness probe (Hiboutik F8) can act on it. UNAUTHENTICATED and
+        // readiness/liveness probe can act on it. UNAUTHENTICATED and
         // deliberately COARSE (no secrets, no per-shop identifiers beyond ids) — it
         // is a probe endpoint. If no report provider is wired, fall back to the
         // original always-ok shape (backward compatible).

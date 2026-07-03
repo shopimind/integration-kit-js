@@ -71,7 +71,7 @@ describe('HTTP runtime (server.inject)', () => {
     await app.stop();
   });
 
-  it('GET /health enriched -> 200 { status: ok } with DB ping + counters (E5)', async () => {
+  it('GET /health enriched -> 200 { status: ok } with DB ping + counters', async () => {
     const app = makeTestApp(integration);
     const res = await app.server.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
@@ -83,7 +83,7 @@ describe('HTTP runtime (server.inject)', () => {
     await app.stop();
   });
 
-  it('GET /admin/overview requires the admin token, returns JSON synthesis (E5)', async () => {
+  it('GET /admin/overview requires the admin token, returns JSON synthesis', async () => {
     const app = createIntegrationApp(integration, {
       databasePath: ':memory:',
       webhookSecret: 'whsec',

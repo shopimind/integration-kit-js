@@ -45,7 +45,7 @@ export function verifyShopimindSignature(
 }
 
 /**
- * Verifies a ShopiMind -> integration webhook against ONE OR SEVERAL secrets (E6).
+ * Verifies a ShopiMind -> integration webhook against ONE OR SEVERAL secrets.
  * During a secret ROTATION the connector runs `[current, next]` (or `[next, current]`)
  * for a window: a request signed with EITHER passes. The check succeeds on the first
  * secret that verifies; if all fail, the LAST failure reason is returned (the timestamp

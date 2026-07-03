@@ -315,7 +315,7 @@ describe('runIntegrationSync - E2 "silent step" warning', () => {
   });
 });
 
-describe('rejectsTolerated (E8)', () => {
+describe('rejectsTolerated', () => {
   it('false/undefined never tolerates; true always tolerates', () => {
     expect(rejectsTolerated(undefined, 1, 10)).toBe(false);
     expect(rejectsTolerated(false, 1, 10)).toBe(false);
@@ -370,7 +370,7 @@ describe('runIntegrationSync - E8 tolerateRejects ratio', () => {
   });
 });
 
-describe('backoffWindowMs (E3)', () => {
+describe('backoffWindowMs', () => {
   it('is 0 with no failures, then exponential (2^(k-1) minutes), capped at 24h', () => {
     expect(backoffWindowMs(0)).toBe(0);
     expect(backoffWindowMs(1)).toBe(60_000); // 1 min

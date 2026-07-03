@@ -18,7 +18,7 @@ export interface SyncOptions {
   fullBackfill?: boolean;
   backfillDays?: number;
   /**
-   * Defensive OVERLAP (E9): on an incremental window, shift `since` back by this many
+   * Defensive OVERLAP: on an incremental window, shift `since` back by this many
    * seconds so an event that landed exactly on the previous cursor boundary (or a
    * source with slightly skewed clocks) is not missed. Harmless: re-fetched items are
    * idempotent on the ShopiMind side (bulkSave upserts). 0/undefined -> no overlap.
@@ -38,21 +38,21 @@ export interface SyncStepSummary {
   advanced: boolean;
   /**
    * True when the step-source was NOT run because its cursor is in exponential
-   * backoff after repeated failures (E3). `items`/`rejected` are 0, `errors` empty.
+   * backoff after repeated failures. `items`/`rejected` are 0, `errors` empty.
    */
   skippedBackoff?: boolean;
 }
 
 /**
- * Log ERROR once this many consecutive failures pile up on a cursor (E3), so a
+ * Log ERROR once this many consecutive failures pile up on a cursor, so a
  * persistently broken source escalates from warn-noise to an actionable signal.
  */
 const ESCALATE_AT_FAILURES = 3;
 /** Backoff is capped at ~24h: 2^(k-1) minutes, never longer than this. */
 const MAX_BACKOFF_MS = 24 * 60 * 60_000;
-/** Base backoff unit (E3): the k-th consecutive failure skips ticks for ~2^(k-1) minutes. */
+/** Base backoff unit: the k-th consecutive failure skips ticks for ~2^(k-1) minutes. */
 const BACKOFF_BASE_MS = 60_000;
-/** Per-run cap on dead-lettered items (E4) — a poison batch must not flood the store. */
+/** Per-run cap on dead-lettered items — a poison batch must not flood the store. */
 const REJECTED_ITEMS_CAP_PER_RUN = 500;
 
 /**
@@ -68,7 +68,7 @@ export function backoffWindowMs(consecutiveFailures: number): number {
 
 /**
  * Decides whether per-item rejections should be TOLERATED (cursor may advance),
- * per the step's `tolerateRejects` policy (E8):
+ * per the step's `tolerateRejects` policy:
  *   - `undefined`/`false` -> never tolerate (strict hold);
  *   - `true`              -> always tolerate (poison-pill escape hatch);
  *   - `{ maxRatio }`      -> tolerate only while rejected/attempted <= maxRatio.
@@ -112,7 +112,7 @@ export interface SyncDeps {
    */
   makeCustomData: (sendBulk: SendBulk) => (name: string) => CustomDataHandle;
   /**
-   * Optional dead-letter sink (E4). When provided, per-item REJECTIONS reported
+   * Optional dead-letter sink. When provided, per-item REJECTIONS reported
    * during a step are recorded here (capped per run) so an operator can inspect and
    * later replay what the API refused. Best-effort: a store failure never aborts sync.
    */
@@ -139,7 +139,7 @@ export async function runIntegrationSync<S>(
 
   const runId = deps.runs.start(base.installationId);
   const summary: SyncSummary = { runId, status: 'ok', mode: full ? 'full' : 'incremental', steps: [], errors: [] };
-  // Per-run budget shared across all step-sources: caps total dead-lettered items (E4).
+  // Per-run budget shared across all step-sources: caps total dead-lettered items.
   const deadLetterBudget = { remaining: REJECTED_ITEMS_CAP_PER_RUN };
 
   try {
@@ -204,7 +204,7 @@ async function runOneSource<S>(
 ): Promise<SyncStepSummary> {
   const cursor = deps.cursors.get(base.installationId, step.entity, sourceKey) ?? null;
 
-  // E3 — EXPONENTIAL BACKOFF. A cursor that keeps failing must not hammer a broken
+  // EXPONENTIAL BACKOFF. A cursor that keeps failing must not hammer a broken
   // upstream every tick. While inside the backoff window (based on the last failure's
   // `updated_at`), skip this step-source entirely. The cursor is NOT touched (GOLDEN
   // RULE preserved) and no error is added — the source will simply retry once the
@@ -233,7 +233,7 @@ async function runOneSource<S>(
   const rejects = { count: 0 };
   const stepSendBulk = makeSendBulk(base.spm, base.logger, (n, items) => {
     rejects.count += n;
-    // E4 — DEAD-LETTER. Persist what the API refused (bounded by the per-run budget)
+    // DEAD-LETTER. Persist what the API refused (bounded by the per-run budget)
     // so it survives the run for inspection/replay. Best-effort: a store hiccup here
     // must never fail the sync.
     if (deps.rejectedItems) recordRejects(deps.rejectedItems, base, step, sourceKey, win, items, rejects.count);
@@ -295,16 +295,16 @@ async function runOneSource<S>(
       last_synced_at: clamped.toISOString(),
       last_status: 'ok',
       items: result.items,
-      // E3 — a clean advance clears the failure escalation.
+      // A clean advance clears the failure escalation.
       consecutive_failures: 0,
     });
   } else if (errors.length > 0) {
     // Failed/blocked step: record the failure WITHOUT advancing the cursor, so the
     // same window is replayed next run (no silent data loss). `last_synced_at` is
-    // nullable by contract (E11) — keep the previous value (or null if never synced).
+    // nullable by contract — keep the previous value (or null if never synced).
     const nextFailures = failures + 1;
     if (nextFailures >= ESCALATE_AT_FAILURES) {
-      // E3 — escalate to ERROR once failures pile up: a persistently broken source
+      // Escalate to ERROR once failures pile up: a persistently broken source
       // deserves an actionable signal, not just repeated warns.
       base.logger.error(`sync step '${step.entity}' failing repeatedly`, {
         entity: step.entity,
@@ -326,7 +326,7 @@ async function runOneSource<S>(
 }
 
 /**
- * Dead-letters the rejected items reported by a push (E4), honouring the per-run
+ * Dead-letters the rejected items reported by a push, honouring the per-run
  * budget. Best-effort: any store error is swallowed (a broken dead-letter must never
  * fail sync) — the rejection is already surfaced via the warn log + cursor hold.
  */
@@ -369,7 +369,7 @@ function safeJson(v: unknown): string {
 
 /**
  * Sync window: backfill on the first run / in full mode, otherwise from the cursor.
- * On an incremental window, `overlapSeconds` (E9) shifts `since` back defensively so
+ * On an incremental window, `overlapSeconds` shifts `since` back defensively so
  * an item on the previous boundary is not missed (re-fetches are idempotent upserts).
  * A backfill window is NOT shifted — it already starts far in the past.
  */

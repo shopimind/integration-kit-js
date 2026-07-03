@@ -36,7 +36,7 @@ export interface CursorRow {
   last_status: string | null;
   last_error: string | null;
   items: number;
-  /** Consecutive failed/held runs for this cursor (E3). Reset to 0 on a clean advance. */
+  /** Consecutive failed/held runs for this cursor. Reset to 0 on a clean advance. */
   consecutive_failures: number;
   updated_at: string;
 }
@@ -52,7 +52,7 @@ export interface CursorWrite {
   last_error?: string | null;
   items?: number;
   /**
-   * Absolute value to persist in `consecutive_failures` (E3). The engine sets 0 on
+   * Absolute value to persist in `consecutive_failures`. The engine sets 0 on
    * a clean advance and the incremented count on a failure/hold. Omitted -> left
    * unchanged (COALESCE), so callers that do not track it keep the old value.
    */
@@ -80,7 +80,7 @@ export interface InboundEventRow {
   processed_at: string | null;
 }
 
-/** A dead-lettered item the ShopiMind API REJECTED during a bulk push (E4). */
+/** A dead-lettered item the ShopiMind API REJECTED during a bulk push. */
 export interface RejectedItemRow {
   id: number;
   installation_id: string;

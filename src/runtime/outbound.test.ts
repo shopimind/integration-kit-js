@@ -12,7 +12,7 @@ const resp = (status: number, retryAfter?: string): RetriableResponse => ({
   headers: { get: (n: string) => (n.toLowerCase() === 'retry-after' && retryAfter != null ? retryAfter : null) },
 });
 
-describe('parseRetryAfterMs (E7)', () => {
+describe('parseRetryAfterMs', () => {
   it('parses a seconds value', () => {
     expect(parseRetryAfterMs('5')).toBe(5000);
   });
@@ -26,7 +26,7 @@ describe('parseRetryAfterMs (E7)', () => {
   });
 });
 
-describe('backoffDelayMs (E7)', () => {
+describe('backoffDelayMs', () => {
   it('honours Retry-After (capped) over the exponential schedule', () => {
     expect(backoffDelayMs(0, { retryAfterMs: 3000, maxDelayMs: 30_000 })).toBe(3000);
     expect(backoffDelayMs(0, { retryAfterMs: 99_999, maxDelayMs: 30_000 })).toBe(30_000);
@@ -40,7 +40,7 @@ describe('backoffDelayMs (E7)', () => {
   });
 });
 
-describe('fetchWithRetry (E7)', () => {
+describe('fetchWithRetry', () => {
   const noSleep = (): Promise<void> => Promise.resolve();
 
   it('returns immediately on a success', async () => {
@@ -89,7 +89,7 @@ describe('fetchWithRetry (E7)', () => {
   });
 });
 
-describe('makeOutboundLimiter (E7)', () => {
+describe('makeOutboundLimiter', () => {
   it('resolves while tokens are available, then waits for a refill', async () => {
     let t = 0;
     const now = (): number => t;

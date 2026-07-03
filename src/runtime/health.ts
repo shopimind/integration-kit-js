@@ -2,7 +2,7 @@ import type { Db } from '../store/db.js';
 import type { Repositories } from '../store/repositories.js';
 
 /**
- * Health & overview reports (E5).
+ * Health & overview reports.
  *
  * `/health` is an UNAUTHENTICATED probe endpoint: it must stay coarse (no secrets,
  * no PII beyond opaque installation ids) and cheap. It answers three questions an

@@ -65,7 +65,7 @@ describe('runProvisioning', () => {
       return okHandler(req);
     });
     const r = await runProvisioning(client, {
-      // Only the authoring essentials — technical fields omitted (E11).
+      // Only the authoring essentials — technical fields omitted.
       orderStatuses: [{ status_id: 'done', lang: 'fr', name: 'Terminé' }],
     });
     expect(r.orderStatuses).toBe(1);
@@ -144,7 +144,7 @@ describe('runProvisioning', () => {
   });
 });
 
-describe('topoSortCustomData (E10)', () => {
+describe('topoSortCustomData', () => {
   it('orders dependencies before dependents', () => {
     const defs: NewCustomDataDefinition[] = [
       {
@@ -182,7 +182,7 @@ describe('topoSortCustomData (E10)', () => {
   });
 });
 
-describe('validateCustomDataDefinition guards (E10)', () => {
+describe('validateCustomDataDefinition guards', () => {
   it('rejects unique_keys not present in fields', () => {
     expect(() =>
       validateCustomDataDefinition({ name: 'd', fields: [{ name: 'a' }], unique_keys: ['b'] }),

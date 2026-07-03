@@ -1,8 +1,9 @@
 import { createRateLimiter } from './rate-limiter.js';
 
 /**
- * Outbound-call helpers (E7) — for a connector talking to its PARTNER's API
- * (Hiboutik, etc.), not to ShopiMind. They are the outbound counterparts of the
+ * Outbound-call helpers — for a connector talking to its PARTNER's API
+ * (a POS or e-commerce partner such as Hiboutik), not to ShopiMind. They are the
+ * outbound counterparts of the
  * inbound rate-limiter the runtime already uses for its own routes.
  *
  *  - `makeOutboundLimiter` wraps the kit's token-bucket into an async gate that

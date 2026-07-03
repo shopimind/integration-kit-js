@@ -2,7 +2,7 @@ import type { SyncStep, SyncStepContext, SyncStepResult, IntegrationContext } fr
 import type { BulkResult } from '../sdk/send-bulk.js';
 
 /**
- * `defineBulkStep` (E12) — pure sugar over the common "stream a window, map each raw
+ * `defineBulkStep` — pure sugar over the common "stream a window, map each raw
  * item to a record, push in batches, advance the cursor to `window.until`" shape that
  * every catalog/entity sync step repeats. The author supplies only the domain bits:
  * where to read (`stream`), how to shape (`map`), and how to push (`push`). The kit
@@ -15,9 +15,9 @@ import type { BulkResult } from '../sdk/send-bulk.js';
  */
 export interface BulkStepConfig<S, Raw, Rec> {
   entity: string;
-  /** Cursor scope. Defaults to `'global'` (E12). */
+  /** Cursor scope. Defaults to `'global'`. */
   cursorScope?: 'global' | 'per-source';
-  /** Whether the step runs for the given settings. Defaults to `() => true` (E12). */
+  /** Whether the step runs for the given settings. Defaults to `() => true`. */
   enabled?: (settings: S) => boolean;
   /** Required for `cursorScope: 'per-source'` — the source keys to iterate. */
   sources?: (ctx: IntegrationContext<S>) => Promise<string[]> | string[];
@@ -75,7 +75,7 @@ export function defineBulkStep<S, Raw, Rec>(config: BulkStepConfig<S, Raw, Rec>)
         return { items, errors };
       }
 
-      // Clean run: advance to window.until by default (E12), unless overridden/null.
+      // Clean run: advance to window.until by default, unless overridden/null.
       const advanceTo = config.advanceTo ? config.advanceTo(ctx) : ctx.window.until;
       return advanceTo == null ? { items, errors } : { items, errors, advanceCursorTo: advanceTo };
     },

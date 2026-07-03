@@ -45,7 +45,7 @@ function setup() {
 const okPush = (_c: any, items: any[]) =>
   Promise.resolve({ ok: true, statusCode: 200, data: { sent_count: items.length, rejected_count: 0, rejected_items: [] } } as any);
 
-describe('defineBulkStep (E12)', () => {
+describe('defineBulkStep', () => {
   it('batches/flushes, counts items, and advances the cursor to window.until by default', async () => {
     const { repos, base, deps } = setup();
     const pushed: number[] = [];

@@ -2,8 +2,8 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Request } from '@hapi/hapi';
 
 /**
- * Admin authentication primitives, shared by the admin HTTP routes and (J2) the
- * admin session manager. Extracted from `routes.ts` so a single, audited place
+ * Admin authentication primitives, shared by the admin HTTP routes and the
+ * admin session manager. A single, audited place
  * owns how the admin token is compared and how the client IP is derived.
  */
 

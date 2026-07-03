@@ -16,7 +16,7 @@ export type LifecycleEvent =
  *
  * IDENTITY CONTRACT — `installation_id` is the SINGLE source of truth. It is the
  * OPAQUE token ShopiMind issues per installation; the integration never
- * interprets it, it only correlates by it (see the store schema). NestJS sends
+ * interprets it, it only correlates by it (see the store schema). ShopiMind sends
  * `{ event, installation_id, ... }` — nothing else is required to route the event.
  *
  * The `id_shop_integration` numeric alias is LEGACY: it predates the opaque token

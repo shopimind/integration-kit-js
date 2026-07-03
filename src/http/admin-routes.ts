@@ -8,13 +8,13 @@ import type { AdminActions } from '../runtime/admin-actions.js';
 
 /**
  * The admin surface: read endpoints backing the operations UI (installations,
- * cursors, runs, webhooks, inbound, state, rejected, audit) plus the legacy E5/E4
- * operator endpoints (`/admin/overview`, scoped `/rejected`) and the sync/status
- * actions — all moved here verbatim so a single builder owns everything under
+ * cursors, runs, webhooks, inbound, state, rejected, audit) plus the operator
+ * endpoints (`/admin/overview`, scoped `/rejected`) and the sync/status
+ * actions — a single builder owns everything under
  * `/admin`. Every route is gated by the per-IP rate limiter AND the admin token.
  *
  * These routes are registered on the main server by default; in two-port mode
- * (J4) they move to a dedicated admin listener while the public routes stay put.
+ * they move to a dedicated admin listener while the public routes stay put.
  */
 export interface AdminRouteDeps {
   adminToken?: string | null;
@@ -26,13 +26,13 @@ export interface AdminRouteDeps {
   sessions?: AdminSessionManager;
   /** Write-side provider (purge, reveal, reprovision, audit). Absent -> mutations return 501. */
   actions?: AdminActions;
-  /** E5 — JSON overview across installations (moved verbatim). */
+  /** JSON overview across installations. */
   overview?(): object;
-  /** E4 — scoped dead-letter for one installation, RAW payloads, operator-only (moved verbatim). */
+  /** Scoped dead-letter for one installation, RAW payloads, operator-only. */
   rejectedItems?(id: string, limit: number): unknown;
   /** Triggers a sync for an installation (`full` = full backfill). */
   runSyncForInstall(id: string, full: boolean): Promise<unknown>;
-  /** Recent runs for an installation (moved verbatim). */
+  /** Recent runs for an installation. */
   recentRuns(id: string): unknown;
 }
 
@@ -347,7 +347,7 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
       },
     },
 
-    // ---- Legacy operator endpoints (moved verbatim) -------------------------
+    // ---- Operator endpoints -------------------------------------------------
     {
       method: 'GET',
       path: '/admin/overview',

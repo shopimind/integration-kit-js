@@ -156,7 +156,7 @@ export class WebhookLogRepo {
       .run({ cutoff: `-${days} days` }).changes;
   }
 
-  /** Most recent webhook log entries (newest first) — for /admin/overview (E5). */
+  /** Most recent webhook log entries (newest first) — for /admin/overview. */
   recent(limit = 20): Array<{ event: string | null; installation_id: string | null; signature_ok: number; created_at: string }> {
     const capped = Math.max(1, Math.min(limit, 200));
     return this.db
@@ -490,7 +490,7 @@ export class InboundEventRepo {
 }
 
 /**
- * Dead-letter of per-item REJECTIONS (E4). The engine records here what the
+ * Dead-letter of per-item REJECTIONS. The engine records here what the
  * ShopiMind API refused during a bulk push (validation), capped per run so a
  * poison batch cannot flood the store; an operator inspects/replays via the admin
  * endpoint. Subject to the same retention purge as the other log tables.

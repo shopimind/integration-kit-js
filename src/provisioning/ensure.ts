@@ -11,6 +11,7 @@ import type {
   NewCustomDataField,
   NewEvent,
 } from '../contracts/index.js';
+import type { Logger } from '../logging/logger.js';
 
 /**
  * Idempotent find-or-create for ShopiMind resources, calling the SDK directly
@@ -70,7 +71,7 @@ function configValue(config: unknown, key: string): string | undefined {
 /**
  * Finds a data source, otherwise creates it. Returns its id.
  *
- * Matching (E16):
+ * Matching:
  *  - if `input.stableConfigKey` is set, match FIRST on `config[stableConfigKey]`
  *    (a permanent identifier, e.g. the store id) — a source found this way but with
  *    a DIFFERENT label has its label UPDATED to the new one (a rename no longer
@@ -89,7 +90,7 @@ export async function ensureDataSource(client: SpmHttpClient, input: NewDataSour
     ) ?? [];
   const wantedLabel = normKey(input.label);
 
-  // E16 — stable-key match first (survives a label rename).
+  // Stable-key match first (survives a label rename).
   if (input.stableConfigKey) {
     const wantedKeyValue = configValue(input.config, input.stableConfigKey);
     if (wantedKeyValue !== undefined) {
@@ -130,6 +131,7 @@ export async function ensureDataSource(client: SpmHttpClient, input: NewDataSour
 export async function ensureCustomDataDefinition(
   client: SpmHttpClient,
   def: NewCustomDataDefinition,
+  logger?: Logger,
 ): Promise<number> {
   const existing = SpmHelpers.unwrapOrThrow<Array<Record<string, unknown>>>(
     await SpmCustomDataDefinitions.list(client),
@@ -178,8 +180,9 @@ export async function ensureCustomDataDefinition(
   // not abort the whole provisioning run, but the operator still gets a signal.
   const activated = await SpmCustomDataDefinitions.activate(client, id);
   if (!activated.ok && activated.statusCode !== 409) {
-    console.warn(
-      `ensureCustomDataDefinition: activate(${id}) returned status ${activated.statusCode}; definition created but not confirmed active`,
+    logger?.warn(
+      'ensureCustomDataDefinition: activate(...) returned status ...; definition created but not confirmed active',
+      { definition: def.name, id, statusCode: activated.statusCode },
     );
   }
   return id;

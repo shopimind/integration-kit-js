@@ -116,7 +116,7 @@ export interface SyncStep<S> {
    * would otherwise freeze the window forever ("poison pill"). Even when `true`,
    * rejections are still surfaced (logged + counted); only the cursor may advance.
    *
-   * `{ maxRatio }` (E8) is a middle ground: tolerate rejections (advance the cursor)
+   * `{ maxRatio }` is a middle ground: tolerate rejections (advance the cursor)
    * ONLY while the reject ratio over the window stays at or below `maxRatio`
    * (rejected / attempted, 0..1). Above it, revert to the strict behaviour and HOLD
    * the cursor — a guard-rail so a suddenly-bad batch is not waved through blindly.

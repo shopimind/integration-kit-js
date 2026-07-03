@@ -36,7 +36,7 @@ export async function runProvisioning(
     }
   }
 
-  // E10 — order the custom-data plan so every custom→custom target is CREATED BEFORE
+  // Order the custom-data plan so every custom→custom target is CREATED BEFORE
   // the definition that references it (its id must exist to resolve the relationship).
   // A topological sort removes the "declare X before Y" foot-gun entirely; a genuine
   // dependency CYCLE is a hard error (unresolvable). A relationship to an out-of-plan
@@ -44,13 +44,14 @@ export async function runProvisioning(
   const orderedCustomData = topoSortCustomData(plan.customData ?? []);
   for (const def of orderedCustomData) {
     try {
-      // E10 — structural guards before the network call: unique_keys ⊆ fields and
+      // Structural guards before the network call: unique_keys ⊆ fields and
       // relationships.sourceField ∈ fields. A misconfig fails here with a precise
       // message instead of an opaque API rejection.
       validateCustomDataDefinition(def);
       result.defIds[def.name] = await ensureCustomDataDefinition(
         client,
         resolveCustomRelationTargets(def, result.defIds, logger),
+        logger,
       );
     } catch (e) {
       result.errors.push(`def ${def.name}: ${errMsg(e)}`);
@@ -71,7 +72,7 @@ export async function runProvisioning(
 
   if (plan.orderStatuses && plan.orderStatuses.length > 0) {
     try {
-      // E11 — fill the technical bookkeeping fields the API needs but the author
+      // Fill the technical bookkeeping fields the API needs but the author
       // should not have to hand-write. Explicit values are preserved.
       const nowIso = new Date().toISOString();
       const statuses = plan.orderStatuses.map((s) => ({
@@ -94,9 +95,9 @@ export async function runProvisioning(
  * Resolves a custom relationship's `targetSchema` declared by NAME (a sibling
  * definition in the same plan) to the sibling's numeric id — mirroring how
  * dataSources resolve `parentKey` -> `parent_id`. Thanks to the topological sort
- * (E10) the sibling is always created before this definition. A `targetSchema` that
+ * the sibling is always created before this definition. A `targetSchema` that
  * is already numeric is left untouched; a custom target that is NON-NUMERIC and NOT
- * in the plan cannot be resolved to an id — it is left as-is and WARNED about (E10).
+ * in the plan cannot be resolved to an id — it is left as-is and WARNED about.
  */
 function resolveCustomRelationTargets(
   def: NewCustomDataDefinition,
@@ -125,7 +126,7 @@ function resolveCustomRelationTargets(
 
 /**
  * Topologically sorts the custom-data plan so a definition is always emitted AFTER
- * the sibling definitions it references via custom→custom relationships (E10). Only
+ * the sibling definitions it references via custom→custom relationships. Only
  * intra-plan custom targets create an edge; system targets and out-of-plan/numeric
  * targets do not. Throws on a dependency cycle (unresolvable ordering). Definitions
  * without in-plan dependencies keep their declaration order (stable).

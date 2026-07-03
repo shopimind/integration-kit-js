@@ -62,7 +62,7 @@ interface GuardableDefinition {
 }
 
 /**
- * Structural guards for a custom-data definition (E10). A definition whose
+ * Structural guards for a custom-data definition. A definition whose
  * `unique_keys` or `relationships.sourceField` reference a field it does not
  * declare is a MISCONFIGURATION that the API would reject opaquely at provisioning
  * time (or, worse, accept and misbehave). Catch it early with a precise message.
