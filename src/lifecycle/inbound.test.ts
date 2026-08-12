@@ -37,19 +37,19 @@ describe('inbound routes (/inbound)', () => {
   beforeEach(async () => {
     received = [];
     boomCount = 0;
-    app = makeTestApp(integration);
+    app = await makeTestApp(integration);
     await activate(app, 'inst1');
   });
 
   it('valid signed call -> handler executed -> 200', async () => {
-    const i = app.signInbound('inst1', { hi: 1 });
+    const i = await app.signInbound('inst1', { hi: 1 });
     const res = await app.server.inject({ method: 'POST', url: '/inbound/ping', payload: i.body, headers: i.headers });
     expect(res.statusCode).toBe(200);
     expect(received).toEqual([{ hi: 1 }]);
   });
 
   it('bad signature -> 401', async () => {
-    const i = app.signInbound('inst1', { hi: 1 });
+    const i = await app.signInbound('inst1', { hi: 1 });
     const res = await app.server.inject({
       method: 'POST',
       url: '/inbound/ping',
@@ -86,13 +86,13 @@ describe('inbound routes (/inbound)', () => {
   });
 
   it('unknown action -> 404', async () => {
-    const i = app.signInbound('inst1', {});
+    const i = await app.signInbound('inst1', {});
     const res = await app.server.inject({ method: 'POST', url: '/inbound/nope', payload: i.body, headers: i.headers });
     expect(res.statusCode).toBe(404);
   });
 
   it('idempotency: a replay (same key) does not re-execute the handler', async () => {
-    const i = app.signInbound('inst1', { n: 1 });
+    const i = await app.signInbound('inst1', { n: 1 });
     const headers = { ...i.headers, 'x-idempotency-key': 'key-1' };
     const r1 = await app.server.inject({ method: 'POST', url: '/inbound/ping', payload: i.body, headers });
     expect(r1.statusCode).toBe(200);
@@ -103,7 +103,7 @@ describe('inbound routes (/inbound)', () => {
   });
 
   it('MANDATORY anti-replay: same signed request replayed WITHOUT idempotency key -> executed only once', async () => {
-    const i = app.signInbound('inst1', { n: 7 });
+    const i = await app.signInbound('inst1', { n: 7 });
     const r1 = await app.server.inject({ method: 'POST', url: '/inbound/ping', payload: i.body, headers: i.headers });
     expect(r1.statusCode).toBe(200);
     const r2 = await app.server.inject({ method: 'POST', url: '/inbound/ping', payload: i.body, headers: i.headers });
@@ -113,7 +113,7 @@ describe('inbound routes (/inbound)', () => {
   });
 
   it('failing handler -> 500 (and marked failed for replay)', async () => {
-    const i = app.signInbound('inst1', {});
+    const i = await app.signInbound('inst1', {});
     const res = await app.server.inject({ method: 'POST', url: '/inbound/boom', payload: i.body, headers: i.headers });
     expect(res.statusCode).toBe(500);
   });
@@ -122,7 +122,7 @@ describe('inbound routes (/inbound)', () => {
     // 'inst2' is never activated: it has an inbound secret (created on the fly by
     // signInbound) so auth passes, but no __access_token -> buildContext() returns
     // null. The call is authenticated yet cannot be served right now.
-    const i = app.signInbound('inst2', { hi: 1 });
+    const i = await app.signInbound('inst2', { hi: 1 });
     const res = await app.server.inject({ method: 'POST', url: '/inbound/ping', payload: i.body, headers: i.headers });
     expect(res.statusCode).toBe(409);
     expect(JSON.parse(res.payload).error).toBe('no_context');
@@ -130,7 +130,7 @@ describe('inbound routes (/inbound)', () => {
   });
 
   it('replay of a previously FAILED call re-executes the handler (claim non-fresh, status failed)', async () => {
-    const i = app.signInbound('inst1', { n: 1 });
+    const i = await app.signInbound('inst1', { n: 1 });
     const headers = { ...i.headers, 'x-idempotency-key': 'retry-1' };
     // First attempt: handler throws -> 500, attempt persisted 'failed'.
     const r1 = await app.server.inject({ method: 'POST', url: '/inbound/boom', payload: i.body, headers });

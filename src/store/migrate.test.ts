@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
-import { runMigrations, currentSchemaVersion } from './migrate.js';
-import { MIGRATIONS } from './migrations.js';
+import { runMigrations, currentSchemaVersion } from './sqlite/migrate.js';
+import { MIGRATIONS } from './sqlite/migrations.js';
 
 const TOTAL = MIGRATIONS.length;
 const MAX_VERSION = Math.max(...MIGRATIONS.map((m) => m.version));

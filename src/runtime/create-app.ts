@@ -1,7 +1,7 @@
 import type { Server } from '@hapi/hapi';
 import { SpmClient, type SpmHttpClient } from '@shopimind/sdk-js';
 import type { Integration, IntegrationContext } from '../integration/types.js';
-import { openDatabase, type Db } from '../store/db.js';
+import type { IntegrationStore } from '../store/port.js';
 import { createRepositories, type Repositories } from '../store/repositories.js';
 import { SecretCipher } from '../security/crypto.js';
 import { createLogger, type Logger } from '../logging/logger.js';
@@ -25,7 +25,22 @@ import { describeIntegration } from '../integration/describe.js';
 import { KIT_VERSION } from './kit-version.js';
 
 export interface CreateAppOptions<S> {
-  databasePath: string;
+  /**
+   * The persistence backend. Two official adapters ship with the kit:
+   * `createSqliteStore` (`@shopimind/integration-kit-js/store-sqlite`, the
+   * zero-config default) and `createPostgresStore`
+   * (`@shopimind/integration-kit-js/store-postgres` — point it at your existing
+   * database). A custom adapter implementing `IntegrationStore` is also accepted
+   * (validate it with the conformance suite). Exactly one of `store` /
+   * `databasePath` is required.
+   */
+  store?: IntegrationStore;
+  /**
+   * SUGAR for the default SQLite backend: equivalent to passing
+   * `store: await createSqliteStore({ path: databasePath })`. Requires the
+   * optional peer dependency `better-sqlite3` to be installed.
+   */
+  databasePath?: string;
   /**
    * Webhook signing secret(s). A single string is the common case; pass an array to
    * open a secret ROTATION window — a webhook signed with ANY listed secret is
@@ -104,6 +119,12 @@ export interface CreateAppOptions<S> {
    * local dev; set true in any real deployment (and serve the UI over HTTPS).
    */
   adminSecureCookie?: boolean;
+  /**
+   * How long `stop()` waits (ms) for in-flight syncs to finish before closing the
+   * store. Default 10s — keep it below your orchestrator's termination grace period
+   * (Kubernetes: `terminationGracePeriodSeconds`). 0 closes immediately.
+   */
+  stopDrainTimeoutMs?: number;
   now?: () => number;
 }
 
@@ -111,7 +132,8 @@ export interface IntegrationApp {
   server: Server;
   /** Present only in two-listener mode (`adminPort` set): the dedicated admin/operations server. */
   adminServer?: Server;
-  db: Db;
+  /** The persistence backend behind the app (migrated and ready). */
+  store: IntegrationStore;
   repos: Repositories;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -122,14 +144,31 @@ export interface IntegrationApp {
  * Assembles a ready-to-run integration: store + crypto + repositories + logger +
  * dispatcher + sync engine + HTTP server + internal scheduler. The kit builds the
  * SDK client itself (direct dependency on `@shopimind/sdk-js`).
+ *
+ * ASYNC since kit v2: the store adapter is loaded dynamically (`databasePath`
+ * sugar) and its schema is migrated before the app is handed back, so a caller
+ * can `server.inject()` right away (tests) without racing the migrations.
  */
-export function createIntegrationApp<S>(integration: Integration<S>, opts: CreateAppOptions<S>): IntegrationApp {
-  const db = openDatabase(opts.databasePath);
+export async function createIntegrationApp<S>(
+  integration: Integration<S>,
+  opts: CreateAppOptions<S>,
+): Promise<IntegrationApp> {
+  // ---- Validate the configuration BEFORE touching the store --------------
+  // `migrate()` can rewrite data (the SQLite upgrade from v1 normalizes stored
+  // timestamps) and is not reversible. A boot that is going to fail on a config
+  // mistake must fail while the store is still untouched, so the operator can
+  // simply fix the value and retry.
   // Fail-closed by default: without a key, encryption at rest is MANDATORY
   // (the constructor throws), unless explicitly opted out via `allowPlaintextSecrets`.
   const allowPlaintext = opts.allowPlaintextSecrets ?? false;
   const cipher = new SecretCipher({ key: opts.credentialsKey ?? null, production: !allowPlaintext });
-  const repos = createRepositories(db, cipher);
+  assertWebhookSecret(opts.webhookSecret);
+
+  const store = await resolveStore(opts);
+  // The slug lets a shared-storage adapter (PostgreSQL) verify this schema belongs
+  // to THIS integration before writing a single row.
+  await store.migrate(integration.slug);
+  const repos = createRepositories(store, cipher);
   const logger = opts.logger ?? createLogger({ bindings: { integration: integration.slug } });
   if (cipher.insecure) {
     logger.warn(
@@ -146,10 +185,13 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
     ((token: string): SpmHttpClient =>
       SpmClient.getClient('v1', token, { labelSource: null, ...(opts.spmBaseUrl ? { baseUrl: opts.spmBaseUrl } : {}) }));
 
-  const buildContext = (id: string): IntegrationContext<S> | null => {
-    const token = repos.state.get(id, ACCESS_TOKEN_KEY);
+  const buildContext = async (id: string): Promise<IntegrationContext<S> | null> => {
+    const token = await repos.state.get(id, ACCESS_TOKEN_KEY);
     if (!token) return null;
-    const configs = loadConfigs(repos.state, id, integration.configSchema);
+    const configs = await loadConfigs(repos.state, id, integration.configSchema);
+    // Pre-load the provisioning blob so `ctx.withSource`/`ctx.customData` stay
+    // synchronous for integrations (the port itself is async).
+    const provisioningRaw = await repos.state.get(id, PROVISIONING_KEY);
     const spm = makeSpmClient(token);
     const ctxLogger = logger.child({ installation_id: id });
     const sendBulk = makeSendBulk(spm, ctxLogger);
@@ -161,9 +203,9 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
       state: repos.state,
       logger: ctxLogger,
       setExternalAccount: (acc) => repos.installs.setExternalAccount(id, acc.id, acc.name ?? null),
-      inboundSecret: ensureInboundSecret(repos.state, id),
-      withSource: makeWithSource(repos.state, id, PROVISIONING_KEY, sendBulk),
-      customData: makeCustomData(repos.state, id, PROVISIONING_KEY, sendBulk, spm),
+      inboundSecret: await ensureInboundSecret(repos.state, id),
+      withSource: makeWithSource(provisioningRaw, sendBulk),
+      customData: makeCustomData(provisioningRaw, sendBulk, spm),
     };
   };
 
@@ -171,26 +213,38 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
   // sync, and an admin call from running at the same time on the same installation
   // (race on the cursors).
   const running = new Set<string>();
+  // Set by stop(): no NEW sync may start while the app is shutting down, so the
+  // drain below cannot be outrun by a scheduler tick or a late admin call.
+  let stopping = false;
   const runSyncOnce = async (id: string, o?: { full?: boolean }): Promise<SyncSummary | null> => {
+    if (stopping) {
+      logger.warn('sync skipped: the integration is shutting down', { installation_id: id });
+      return null;
+    }
+    // Claim the lock BEFORE any await: with an async context build, checking and
+    // adding around an await would let two concurrent calls both pass the check.
     if (running.has(id)) {
       logger.warn('sync skipped: already running for this installation', { installation_id: id });
       return null;
     }
-    const base = buildContext(id);
-    if (!base) {
-      logger.warn('sync skipped: no context (unknown installation or no token)', { installation_id: id });
-      return null;
-    }
     running.add(id);
     try {
+      const base = await buildContext(id);
+      if (!base) {
+        logger.warn('sync skipped: no context (unknown installation or no token)', { installation_id: id });
+        return null;
+      }
+      // The provisioning blob is read once here; safe because reprovision and sync
+      // share the same per-installation lock (they never overlap).
+      const provisioningRaw = await repos.state.get(id, PROVISIONING_KEY);
       return await runIntegrationSync(
         integration,
         base,
         {
           cursors: repos.cursors,
           runs: repos.runs,
-          makeSource: (sb) => makeWithSource(repos.state, id, PROVISIONING_KEY, sb),
-          makeCustomData: (sb) => makeCustomData(repos.state, id, PROVISIONING_KEY, sb, base.spm),
+          makeSource: (sb) => makeWithSource(provisioningRaw, sb),
+          makeCustomData: (sb) => makeCustomData(provisioningRaw, sb, base.spm),
           // Feed the dead-letter sink so rejected items survive the run.
           rejectedItems: repos.rejectedItems,
         },
@@ -211,17 +265,18 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
   const reprovision = async (
     id: string,
   ): Promise<{ sources: number; defs: number; events: number; orderStatuses: number; errors: string[] }> => {
-    const ctx = buildContext(id);
-    if (!ctx) throw new Error('unknown_installation');
-    if (!integration.provisioning) return { sources: 0, defs: 0, events: 0, orderStatuses: 0, errors: [] };
     // Share the per-installation lock: reprovision rewrites PROVISIONING_KEY, which a
     // concurrent sync reads for its source/def ids — the two must never overlap.
+    // Claimed BEFORE any await (same race note as runSyncOnce).
     if (running.has(id)) throw new Error('busy: a sync or reprovision is already running for this installation');
     running.add(id);
     try {
+      const ctx = await buildContext(id);
+      if (!ctx) throw new Error('unknown_installation');
+      if (!integration.provisioning) return { sources: 0, defs: 0, events: 0, orderStatuses: 0, errors: [] };
       const plan = await integration.provisioning(ctx);
       const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
-      repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
+      await repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
       return {
         sources: Object.keys(prov.sourceIds).length,
         defs: Object.keys(prov.defIds).length,
@@ -274,7 +329,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
     dispatcher,
     webhookRateLimit,
     // Enriched health probe (DB ping, run ages, cursors in error).
-    healthReport: () => buildHealthReport(db, repos, nowMs()),
+    healthReport: () => buildHealthReport(store, repos, nowMs()),
     inbound: {
       integration,
       repos,
@@ -339,6 +394,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
   // ---- Internal scheduler (periodic incremental sync) -----------------------
   const intervalMinutes = opts.syncIntervalMinutes ?? 15;
   const autoSync = (opts.autoSync ?? true) && intervalMinutes > 0;
+  const stopDrainTimeoutMs = opts.stopDrainTimeoutMs ?? 10_000;
   let timer: ReturnType<typeof setInterval> | null = null;
   let sweeping = false;
 
@@ -347,7 +403,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
     if (sweeping) return; // the previous pass has not finished -> skip this tick
     sweeping = true;
     try {
-      for (const inst of repos.installs.listActive()) {
+      for (const inst of await repos.installs.listActive()) {
         try {
           await runSyncOnce(inst.installation_id, { full: false });
         } catch (e) {
@@ -371,14 +427,14 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
   const auditRetentionDays = opts.auditRetentionDays ?? 365;
   const retentionEnabled = retentionDays > 0 || rejectedRetentionDays > 0 || auditRetentionDays > 0;
   let retentionTimer: ReturnType<typeof setInterval> | null = null;
-  const purgeOldRecords = (): void => {
+  const purgeOldRecords = async (): Promise<void> => {
     try {
-      const log = retentionDays > 0 ? repos.webhookLog.purgeOlderThan(retentionDays) : 0;
-      const seen = retentionDays > 0 ? repos.webhookSeen.purgeOlderThan(retentionDays) : 0;
-      const inbound = retentionDays > 0 ? repos.inboundEvents.purgeOlderThan(retentionDays) : 0;
-      const rejected = rejectedRetentionDays > 0 ? repos.rejectedItems.purgeOlderThan(rejectedRetentionDays) : 0; // E4 dead-letter
-      const runs = retentionDays > 0 ? repos.runs.purgeOlderThan(retentionDays) : 0; // sync-run history
-      const audit = auditRetentionDays > 0 ? repos.audit.purgeOlderThan(auditRetentionDays) : 0; // admin trail
+      const log = retentionDays > 0 ? await repos.webhookLog.purgeOlderThan(retentionDays) : 0;
+      const seen = retentionDays > 0 ? await repos.webhookSeen.purgeOlderThan(retentionDays) : 0;
+      const inbound = retentionDays > 0 ? await repos.inboundEvents.purgeOlderThan(retentionDays) : 0;
+      const rejected = rejectedRetentionDays > 0 ? await repos.rejectedItems.purgeOlderThan(rejectedRetentionDays) : 0; // E4 dead-letter
+      const runs = retentionDays > 0 ? await repos.runs.purgeOlderThan(retentionDays) : 0; // sync-run history
+      const audit = auditRetentionDays > 0 ? await repos.audit.purgeOlderThan(auditRetentionDays) : 0; // admin trail
       if (log + seen + inbound + rejected + runs + audit > 0) {
         logger.info('retention purge', {
           webhook_log: log,
@@ -400,7 +456,7 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
   return {
     server,
     ...(adminServer ? { adminServer } : {}),
-    db,
+    store,
     repos,
     start: async () => {
       await server.start();
@@ -417,13 +473,17 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
         logger.info('sync scheduler enabled', { intervalMinutes });
       }
       if (retentionEnabled) {
-        purgeOldRecords();
-        retentionTimer = setInterval(() => purgeOldRecords(), 24 * 60 * 60_000);
+        await purgeOldRecords();
+        retentionTimer = setInterval(() => {
+          void purgeOldRecords();
+        }, 24 * 60 * 60_000);
         retentionTimer.unref();
         logger.info('retention enabled', { retentionDays, rejectedRetentionDays, auditRetentionDays });
       }
     },
     stop: async () => {
+      // Refuse new work first, so the drain below cannot be outrun.
+      stopping = true;
       if (timer) {
         clearInterval(timer);
         timer = null;
@@ -444,8 +504,61 @@ export function createIntegrationApp<S>(integration: Integration<S>, opts: Creat
       } catch {
         /* server not started */
       }
-      db.close();
+      // DRAIN the in-flight syncs before closing the store. Without this, a sync
+      // running when the signal arrives keeps issuing queries against a closing
+      // backend: it dies mid-window on an opaque error, and its `sync_run` row
+      // stays 'running' forever. Bounded so a wedged step cannot block shutdown
+      // past the orchestrator's grace period.
+      if (running.size > 0) {
+        logger.info('waiting for in-flight syncs before closing the store', {
+          in_flight: running.size,
+          timeout_ms: stopDrainTimeoutMs,
+        });
+        const deadline = nowMs() + stopDrainTimeoutMs;
+        while (running.size > 0 && nowMs() < deadline) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        if (running.size > 0) {
+          logger.warn('shutdown drain timed out: closing the store with syncs still in flight', {
+            in_flight: running.size,
+            installations: [...running],
+          });
+        }
+      }
+      await store.close();
     },
     runSyncOnce,
   };
+}
+
+/**
+ * Rejects a missing/blank webhook secret at construction. Without it every
+ * lifecycle webhook would fail signature verification at runtime — better to
+ * refuse to boot than to run an integration that can never be installed.
+ */
+function assertWebhookSecret(secret: string | string[]): void {
+  const list = Array.isArray(secret) ? secret : [secret];
+  if (list.length === 0 || list.some((s) => typeof s !== 'string' || s.length === 0)) {
+    throw new Error('createIntegrationApp: `webhookSecret` is required (a non-empty string, or an array of them for a rotation window)');
+  }
+}
+
+/**
+ * Resolves the store from the options: an explicit `store` wins; `databasePath`
+ * loads the SQLite adapter dynamically (so `better-sqlite3` stays an optional
+ * peer). Exactly one of the two must be provided.
+ */
+async function resolveStore<S>(opts: CreateAppOptions<S>): Promise<IntegrationStore> {
+  if (opts.store && opts.databasePath) {
+    throw new Error("createIntegrationApp: pass either 'store' or 'databasePath', not both");
+  }
+  if (opts.store) return opts.store;
+  if (opts.databasePath) {
+    const { createSqliteStore } = await import('../store/sqlite/index.js');
+    return createSqliteStore({ path: opts.databasePath });
+  }
+  throw new Error(
+    "createIntegrationApp: a persistence backend is required — pass 'databasePath' (SQLite default) " +
+      "or 'store' (e.g. createPostgresStore from '@shopimind/integration-kit-js/store-postgres')",
+  );
 }

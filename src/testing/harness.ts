@@ -5,6 +5,7 @@ import { createLogger } from '../logging/logger.js';
 import { signShopimindBody } from '../security/signature.js';
 import { ensureInboundSecret } from '../lifecycle/inbound.js';
 import type { Integration } from '../integration/types.js';
+import type { IntegrationStore } from '../store/port.js';
 
 export interface TestAppOptions {
   /** Simulated SDK client (default: an offline stub returning empty ok responses). */
@@ -14,17 +15,23 @@ export interface TestAppOptions {
   now?: () => number;
   /** Admin token for exercising /admin/* endpoints in tests (default: none -> admin routes 401). */
   adminToken?: string;
+  /**
+   * Store to test against. Defaults to an in-memory SQLite store, which requires
+   * the `better-sqlite3` peer dependency — pass your own (e.g. a throwaway
+   * PostgreSQL schema) to test an integration that ships without it.
+   */
+  store?: IntegrationStore;
 }
 
 export interface TestApp extends IntegrationApp {
   /** Signs a webhook payload (body + headers ready for `server.inject`). */
   signWebhook(payload: object, ts?: number): { body: string; headers: Record<string, string> };
   /** Signs an INBOUND call (route /inbound) with the per-installation secret. */
-  signInbound(installationId: string, payload: object, ts?: number): { body: string; headers: Record<string, string> };
+  signInbound(installationId: string, payload: object, ts?: number): Promise<{ body: string; headers: Record<string, string> }>;
 }
 
-/** Builds a test app: in-memory store, stub SDK client, webhook signing. */
-export function makeTestApp<S>(integration: Integration<S>, opts: TestAppOptions = {}): TestApp {
+/** Builds a test app: in-memory store, stub SDK client, webhook signing. Async since kit v2. */
+export async function makeTestApp<S>(integration: Integration<S>, opts: TestAppOptions = {}): Promise<TestApp> {
   // Guard: this harness is NEVER intended for production (test keys/server).
   if (process.env.NODE_ENV === 'production') {
     throw new Error('makeTestApp() is for tests only and forbidden in production');
@@ -32,8 +39,8 @@ export function makeTestApp<S>(integration: Integration<S>, opts: TestAppOptions
   const secret = opts.secret ?? 'test_' + randomBytes(16).toString('hex');
   const fixedNow = opts.now ?? ((): number => 1_700_000_000_000);
   const stub = opts.spm ?? makeStubSpmClient();
-  const app = createIntegrationApp(integration, {
-    databasePath: ':memory:',
+  const app = await createIntegrationApp(integration, {
+    ...(opts.store ? { store: opts.store } : { databasePath: ':memory:' }),
     webhookSecret: secret,
     credentialsKey: randomBytes(32).toString('hex'),
     makeSpmClient: () => stub,
@@ -57,8 +64,8 @@ export function makeTestApp<S>(integration: Integration<S>, opts: TestAppOptions
         },
       };
     },
-    signInbound(installationId: string, payload: object, ts: number = Math.floor(fixedNow() / 1000)) {
-      const inboundSecret = ensureInboundSecret(app.repos.state, installationId);
+    async signInbound(installationId: string, payload: object, ts: number = Math.floor(fixedNow() / 1000)) {
+      const inboundSecret = await ensureInboundSecret(app.repos.state, installationId);
       const body = JSON.stringify(payload);
       return {
         body,

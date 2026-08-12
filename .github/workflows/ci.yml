@@ -9,6 +9,25 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    services:
+      # Real PostgreSQL for the store conformance + e2e suites. Without
+      # TEST_POSTGRES_URL those suites are skipped — the service makes sure the
+      # PostgreSQL adapter is exercised on every push, like the SQLite one.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kit
+          POSTGRES_PASSWORD: kit
+          POSTGRES_DB: kit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kit"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgres://kit:kit@localhost:5432/kit_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

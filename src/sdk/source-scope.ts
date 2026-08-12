@@ -1,5 +1,4 @@
 import type { SpmEnvelope, SpmHttpClient } from '@shopimind/sdk-js';
-import type { IntegrationStateRepo } from '../store/repositories.js';
 import type { BulkResult, SendBulk, SendBulkOptions } from './send-bulk.js';
 
 /**
@@ -33,25 +32,27 @@ export interface SourceHandle {
 
 /**
  * Builds `ctx.withSource`: resolves the `id_data_source` of a PROVISIONED source
- * (from the integration state) and returns a {@link SourceHandle}. Throws if the
- * source was not declared in `provisioning.dataSources` (guard: pushing catalog data
- * without a dedicated source is not allowed).
+ * and returns a {@link SourceHandle}. Throws if the source was not declared in
+ * `provisioning.dataSources` (guard: pushing catalog data without a dedicated
+ * source is not allowed).
+ *
+ * `provisioningRaw` is the persisted provisioning blob, PRE-LOADED by the runtime
+ * when the context is built (the port is async; pre-loading keeps `ctx.withSource`
+ * synchronous for integrations). Safe: a reprovision never runs concurrently with
+ * a sync on the same installation (the runtime's per-installation lock).
  */
 export function makeWithSource(
-  state: IntegrationStateRepo,
-  installationId: string,
-  provisioningKey: string,
+  provisioningRaw: string | null,
   sendBulk: SendBulk,
 ): (sourceKey: string) => SourceHandle {
   return (sourceKey: string): SourceHandle => {
-    const raw = state.get(installationId, provisioningKey);
     // Parse defensively: corrupt/unreadable persisted state must surface as the
     // business error "source not provisioned" (below), never as an opaque
     // SyntaxError. An unparseable blob is treated as "no sources provisioned".
     let sourceIds: Record<string, number> = {};
-    if (raw) {
+    if (provisioningRaw) {
       try {
-        sourceIds = (JSON.parse(raw) as { sourceIds?: Record<string, number> }).sourceIds ?? {};
+        sourceIds = (JSON.parse(provisioningRaw) as { sourceIds?: Record<string, number> }).sourceIds ?? {};
       } catch {
         sourceIds = {};
       }

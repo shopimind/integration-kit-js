@@ -20,7 +20,7 @@ const integration: Integration<S> = defineIntegration({
 
 describe('HTTP runtime (server.inject)', () => {
   it('GET /health -> 200 (status ok)', async () => {
-    const app = makeTestApp(integration);
+    const app = await makeTestApp(integration);
     const res = await app.server.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
     // E5 enriched the shape; the coarse contract remains `status: 'ok'` on a healthy probe.
@@ -29,7 +29,7 @@ describe('HTTP runtime (server.inject)', () => {
   });
 
   it('POST /webhook/receive (signed) -> 200 + install persisted', async () => {
-    const app = makeTestApp(integration);
+    const app = await makeTestApp(integration);
     const { body, headers } = app.signWebhook({
       event: 'integration.installed',
       id_shop_integration: 1,
@@ -39,12 +39,12 @@ describe('HTTP runtime (server.inject)', () => {
     const res = await app.server.inject({ method: 'POST', url: '/webhook/receive', payload: body, headers });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.payload).success).toBe(true);
-    expect(app.repos.installs.find('1')?.status).toBe('inactive');
+    expect((await app.repos.installs.find('1'))?.status).toBe('inactive');
     await app.stop();
   });
 
   it('POST /webhook/receive (bad signature) -> 401', async () => {
-    const app = makeTestApp(integration);
+    const app = await makeTestApp(integration);
     const res = await app.server.inject({
       method: 'POST',
       url: '/webhook/receive',
@@ -56,14 +56,14 @@ describe('HTTP runtime (server.inject)', () => {
   });
 
   it('POST /admin/sync/1 without token -> 401', async () => {
-    const app = makeTestApp(integration);
+    const app = await makeTestApp(integration);
     const res = await app.server.inject({ method: 'POST', url: '/admin/sync/1' });
     expect(res.statusCode).toBe(401);
     await app.stop();
   });
 
   it('POST /webhook/test-connection (signed) -> success', async () => {
-    const app = makeTestApp(integration);
+    const app = await makeTestApp(integration);
     const { body, headers } = app.signWebhook({ account: 'x' });
     const res = await app.server.inject({ method: 'POST', url: '/webhook/test-connection', payload: body, headers });
     expect(res.statusCode).toBe(200);
@@ -72,7 +72,7 @@ describe('HTTP runtime (server.inject)', () => {
   });
 
   it('GET /health enriched -> 200 { status: ok } with DB ping + counters', async () => {
-    const app = makeTestApp(integration);
+    const app = await makeTestApp(integration);
     const res = await app.server.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.payload);
@@ -84,7 +84,7 @@ describe('HTTP runtime (server.inject)', () => {
   });
 
   it('GET /admin/overview requires the admin token, returns JSON synthesis', async () => {
-    const app = createIntegrationApp(integration, {
+    const app = await createIntegrationApp(integration, {
       databasePath: ':memory:',
       webhookSecret: 'whsec',
       credentialsKey: randomBytes(32).toString('hex'),
@@ -104,7 +104,7 @@ describe('HTTP runtime (server.inject)', () => {
   });
 
   it('GET /admin/installations/{id}/rejected returns dead-lettered items (E4, admin)', async () => {
-    const app = createIntegrationApp(integration, {
+    const app = await createIntegrationApp(integration, {
       databasePath: ':memory:',
       webhookSecret: 'whsec',
       credentialsKey: randomBytes(32).toString('hex'),
@@ -113,7 +113,7 @@ describe('HTTP runtime (server.inject)', () => {
       autoSync: false,
       logger: createLogger({ sink: () => {} }),
     });
-    app.repos.rejectedItems.add({ installation_id: 'inst1', run_id: 7, entity: 'orders', payload_json: '{"id":1}', reason: 'bad' });
+    await app.repos.rejectedItems.add({ installation_id: 'inst1', run_id: 7, entity: 'orders', payload_json: '{"id":1}', reason: 'bad' });
     const noAuth = await app.server.inject({ method: 'GET', url: '/admin/installations/inst1/rejected' });
     expect(noAuth.statusCode).toBe(401);
     const ok = await app.server.inject({ method: 'GET', url: '/admin/installations/inst1/rejected', headers: { 'x-admin-token': 'admintok' } });
@@ -125,7 +125,7 @@ describe('HTTP runtime (server.inject)', () => {
   });
 
   it('E6: accepts a webhook signed with EITHER secret during a rotation window', async () => {
-    const app = createIntegrationApp(integration, {
+    const app = await createIntegrationApp(integration, {
       databasePath: ':memory:',
       webhookSecret: ['old_secret', 'new_secret'], // rotation window
       credentialsKey: randomBytes(32).toString('hex'),
@@ -163,7 +163,7 @@ describe('HTTP runtime (server.inject)', () => {
 
   it('J4: adminPort moves the admin surface OFF the public listener', async () => {
     const token = 'a'.repeat(40);
-    const app = createIntegrationApp(integration, {
+    const app = await createIntegrationApp(integration, {
       databasePath: ':memory:',
       webhookSecret: 'whsec',
       credentialsKey: randomBytes(32).toString('hex'),
@@ -186,7 +186,7 @@ describe('HTTP runtime (server.inject)', () => {
 
   it('J4: single-listener (default) keeps /admin on the public server', async () => {
     const token = 'a'.repeat(40);
-    const app = makeTestApp(integration, { adminToken: token });
+    const app = await makeTestApp(integration, { adminToken: token });
     const admin = await app.server.inject({ method: 'GET', url: '/admin/meta', headers: { 'x-admin-token': token } });
     expect(admin.statusCode).toBe(200);
     await app.stop();
@@ -194,7 +194,7 @@ describe('HTTP runtime (server.inject)', () => {
 
   it('J4: adminSecureCookie marks the session cookie Secure', async () => {
     const token = 'a'.repeat(40);
-    const app = createIntegrationApp(integration, {
+    const app = await createIntegrationApp(integration, {
       databasePath: ':memory:',
       webhookSecret: 'whsec',
       credentialsKey: randomBytes(32).toString('hex'),
@@ -227,9 +227,9 @@ describe('HTTP runtime (server.inject)', () => {
         { entity: 'x', cursorScope: 'global', enabled: () => true, run: async () => { await gate; return { items: 0, errors: [] }; } },
       ],
     });
-    const app = makeTestApp(c, { adminToken: token });
-    app.repos.installs.upsert({ installation_id: '1', status: 'active' });
-    app.repos.state.setSecret('1', '__access_token', 'int_T');
+    const app = await makeTestApp(c, { adminToken: token });
+    await app.repos.installs.upsert({ installation_id: '1', status: 'active' });
+    await app.repos.state.setSecret('1', '__access_token', 'int_T');
 
     const syncing = app.runSyncOnce('1', { full: false }); // holds the lock (step awaits the gate)
     const res = await app.server.inject({ method: 'POST', url: '/admin/installations/1/reprovision', headers: { 'x-admin-token': token } });
@@ -259,7 +259,7 @@ describe('HTTP runtime (server.inject)', () => {
         },
       ],
     });
-    const app = makeTestApp(c);
+    const app = await makeTestApp(c);
     const { body, headers } = app.signWebhook({
       event: 'integration.activated',
       id_shop_integration: 1,

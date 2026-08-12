@@ -39,10 +39,13 @@ export * from './lifecycle/dispatcher.js';
 // Inbound routes (secured middleware: integrator app -> integration -> ShopiMind)
 export * from './lifecycle/inbound.js';
 
-// Persistence (versioned migrations + typed repositories)
-export * from './store/db.js';
-export * from './store/migrate.js';
-export * from './store/migrations.js';
+// Persistence: the PORT (async, backend-agnostic) + the kit-side facades.
+// Official adapters live in subpath exports so their drivers stay optional:
+//   '@shopimind/integration-kit-js/store-sqlite'   -> createSqliteStore (default backend)
+//   '@shopimind/integration-kit-js/store-postgres' -> createPostgresStore
+//   '@shopimind/integration-kit-js/store-testing'  -> the store conformance suite
+export type * from './store/port.js';
+export * from './store/time.js';
 export * from './store/repositories.js';
 export type * from './store/types.js';
 

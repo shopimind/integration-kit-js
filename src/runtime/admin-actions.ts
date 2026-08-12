@@ -30,15 +30,15 @@ export interface ReprovisionOutcome {
 
 export interface AdminActions {
   /** Deletes rejected items by id, scoped to the installation. Returns rows removed. */
-  purgeRejected(installationId: string, ids: number[]): number;
+  purgeRejected(installationId: string, ids: number[]): Promise<number>;
   /** The raw rejected-item row for an audited reveal, or null if unknown. */
-  revealRejected(id: number): { installation_id: string; payload_json: string | null } | null;
+  revealRejected(id: number): Promise<{ installation_id: string; payload_json: string | null } | null>;
   /** The stored webhook payload, scoped to the installation, or null if unknown/mismatched. */
-  revealWebhook(installationId: string, logId: number): { payload_json: string | null } | null;
+  revealWebhook(installationId: string, logId: number): Promise<{ payload_json: string | null } | null>;
   /** Re-runs the integration's provisioning for an installation (idempotent). */
   reprovision(id: string): Promise<ReprovisionOutcome>;
   /** Appends an entry to the audit trail (metadata only — no secrets, no raw PII). */
-  audit(entry: AuditEntry): void;
+  audit(entry: AuditEntry): Promise<void>;
 }
 
 export function buildAdminActions(
@@ -49,12 +49,12 @@ export function buildAdminActions(
     purgeRejected(installationId, ids) {
       return repos.rejectedItems.deleteByIds(installationId, ids);
     },
-    revealRejected(id) {
-      const row = repos.rejectedItems.findById(id);
+    async revealRejected(id) {
+      const row = await repos.rejectedItems.findById(id);
       return row ? { installation_id: row.installation_id, payload_json: row.payload_json } : null;
     },
-    revealWebhook(installationId, logId) {
-      const row = repos.webhookLog.findById(logId);
+    async revealWebhook(installationId, logId) {
+      const row = await repos.webhookLog.findById(logId);
       if (!row || row.installation_id !== installationId) return null; // scope guard
       return { payload_json: row.payload_json };
     },
@@ -62,7 +62,7 @@ export function buildAdminActions(
       return deps.reprovision(id);
     },
     audit(entry) {
-      repos.audit.add({
+      return repos.audit.add({
         action: entry.action,
         installation_id: entry.installationId ?? null,
         target: entry.target ?? null,

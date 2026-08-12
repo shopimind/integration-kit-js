@@ -4,6 +4,154 @@ All notable changes to `@shopimind/integration-kit-js` are documented here.
 This project follows [Semantic Versioning](https://semver.org/): `patch` = fix,
 `minor` = backward-compatible addition, `major` = breaking change.
 
+## 2.0.0
+
+**Pluggable persistence.** The store behind the kit is now an async, backend-agnostic
+port (`IntegrationStore`) with two official adapters — SQLite (the zero-config
+default, unchanged behaviour) and **PostgreSQL** (point the kit at your existing
+database: no local file, no persistent filesystem, no native module to compile).
+
+### New
+
+- **`store` option** on `createIntegrationApp`: pass any `IntegrationStore`.
+  `databasePath` still works and remains the SQLite sugar.
+- **`@shopimind/integration-kit-js/store-sqlite`** — `createSqliteStore({ path, clock? })`.
+- **`@shopimind/integration-kit-js/store-postgres`** — `createPostgresStore({
+  connectionString | pool, schema?, maxConnections?, connectionTimeoutMs?,
+  statementTimeoutMs?, pingTimeoutMs?, onPoolError?, clock? })`. All tables live in a
+  dedicated PostgreSQL schema of YOUR database (default `shopimind_kit` — name one per
+  integration); migrations are versioned, transactional and serialized on an advisory lock.
+- **`@shopimind/integration-kit-js/store-testing`** — `runStoreConformanceSuite`,
+  the executable contract of the port (atomic claims, secret-preview invariant,
+  purge cutoffs, literal search, pagination). Both official adapters pass it in CI;
+  run it against your own adapter if you implement a custom backend.
+- Custom backends are an explicit extension point: implement `IntegrationStore`
+  and validate with the conformance suite. Semver policy: the port may GAIN
+  methods in a minor; removals/signature changes only in a major.
+
+### Breaking
+
+- **The persistence API is async.** Every repository method returns a `Promise`,
+  including `ctx.state.get/set/setSecret/delete` and `ctx.setExternalAccount`.
+  In practice an integration adds `await` at those call sites — everything else
+  (`ctx.spm`, `ctx.sendBulk`, `ctx.withSource`, `ctx.customData`) is unchanged
+  and stays synchronous to build.
+- **`createIntegrationApp` is async** (`await createIntegrationApp(...)`): the
+  store driver is loaded dynamically and the schema is migrated before the app is
+  returned. Same for the test harness: `await makeTestApp(...)`, and its
+  `signInbound(...)` is now async.
+- **`IntegrationApp.db` is gone** — use `IntegrationApp.store` (the port) and
+  `IntegrationApp.repos` (kit facades, async). `openDatabase` / the better-sqlite3
+  `Db` type are no longer exported from the package root. If you really need the
+  raw handle, a store built by `createSqliteStore` still exposes it as `.db`.
+- **The SQLite migration exports moved to the subpath.** `MIGRATIONS`,
+  `Migration`, `runMigrations` and `currentSchemaVersion` are no longer exported
+  by the package root — import them from
+  `@shopimind/integration-kit-js/store-sqlite`. They are dialect-specific
+  (PostgreSQL ships its own `PG_MIGRATIONS` on `/store-postgres`). Applying the
+  schema is not a caller's job anyway: `createIntegrationApp` awaits
+  `store.migrate()` before handing the app back.
+- **These root exports are now async** — add `await`: `loadConfigs`,
+  `saveConfigs`, `ensureInboundSecret`, `buildHealthReport`, `buildOverview`.
+  If you wire the kit's HTTP layer yourself, the matching contracts changed too:
+  `RouteDeps.healthReport` and `InboundDeps.buildContext` must now return a
+  `Promise`.
+- **`createRepositories(store, cipher, clock?)`** replaces
+  `createRepositories(db, cipher)` — pass an `IntegrationStore` (from
+  `createSqliteStore` / `createPostgresStore` / your own adapter) instead of a
+  better-sqlite3 handle. The optional third argument is an injectable clock for
+  tests.
+- **`better-sqlite3` is now an optional peer dependency** (as is `pg`). An
+  integration using the SQLite default must add it to its own dependencies:
+  `yarn add better-sqlite3`. A PostgreSQL integration adds `pg` instead — and
+  never compiles a native module.
+- `makeWithSource` / `makeCustomData` (advanced API) now take the pre-loaded
+  provisioning blob: `makeWithSource(provisioningRaw, sendBulk)` and
+  `makeCustomData(provisioningRaw, sendBulk, spm)`, instead of
+  `(state, installationId, provisioningKey, ...)`. Read the blob once
+  (`await repos.state.get(id, PROVISIONING_KEY)`) and pass it in — this is what
+  keeps `ctx.withSource` / `ctx.customData` synchronous inside a step.
+- **`webhookSecret` is validated at construction.** An empty string, an entry
+  that is not a string, or an empty rotation array now throws instead of booting
+  an integration whose webhooks could never verify.
+
+### Hardening
+
+Failure paths that only surface in production, closed as part of this release:
+
+- **A failed boot no longer touches the store.** The credentials key and the
+  webhook secret are validated BEFORE `store.migrate()` runs, so a typo in an
+  environment variable cannot leave a half-converted database behind.
+- **`stop()` drains in-flight syncs** before closing the store (bounded by
+  `stopDrainTimeoutMs`, default 10s; keep it under your orchestrator's grace
+  period). A sync caught by SIGTERM used to die mid-window against a closing
+  backend, leaving its `sync_run` row `running` forever.
+- **PostgreSQL: a dropped idle connection no longer kills the process.** The
+  store always attaches a `pool.on('error')` listener (surfaced through the new
+  `onPoolError` option) — `pg` otherwise raises it as an `uncaughtException` on a
+  managed-database failover.
+- **PostgreSQL: bounded waits.** New `connectionTimeoutMs` (5s),
+  `statementTimeoutMs` (30s) and `pingTimeoutMs` (3s) options, so a saturated
+  pool or an unresponsive server fails fast instead of hanging `/health`.
+  Default `maxConnections` raised 5 → 10.
+- **PostgreSQL: schemas are owned.** The first integration to migrate a schema
+  stamps its slug on it; another integration pointed at the same schema now
+  refuses to boot instead of silently merging both integrations' installations,
+  cursors and secrets. `IntegrationStore.migrate(owner?)` carries the slug —
+  a custom adapter may ignore it (a SQLite file cannot collide this way).
+- **`/health` always answers.** Every store call in the probe is guarded, not
+  just the ping: a failure after the ping (revoked grants, dropped schema,
+  failover mid-DDL) now returns the documented `{ db: 'error' }` / 503 instead of
+  a bodiless 500.
+- **Driver load errors are no longer mislabelled.** A native module that fails to
+  *initialize* (the classic `better-sqlite3` ABI mismatch after a Node upgrade or
+  an image rebuild) surfaces its real error; only a genuinely unresolvable module
+  reports "install the peer dependency".
+- **Pagination bounds are integers.** `limit`/`offset` and reveal/purge ids are
+  floored and range-checked in the kit, so hostile input behaves identically on
+  both adapters instead of erroring on PostgreSQL only.
+
+### Migration from 1.x (SQLite, no backend change)
+
+1. `yarn add @shopimind/integration-kit-js@^2 better-sqlite3`.
+2. `const app = await createIntegrationApp(...)` (add the `await`).
+3. Add `await` on every `ctx.state.*` and `ctx.setExternalAccount` call site.
+4. Tests using `makeTestApp` / `signInbound`: add `await`.
+
+**Your existing SQLite file is reused as-is** — same schema, same encrypted
+secrets, same cursors, same idempotency/anti-replay keys. On first boot, a new
+append-only migration (`9 — normalize_legacy_timestamps`) rewrites the timestamps
+v1 stamped through SQL `datetime('now')` (`YYYY-MM-DD HH:MM:SS`) into the ISO-8601
+UTC form v2 writes. This runs once, inside the migration transaction; on a large
+store it adds a few seconds to that first startup. It is what keeps retention
+purges and time-window counters exact — the two formats do not compare against
+each other (`' '` sorts before `'T'`), so a legacy row dated the same calendar day
+as a purge cutoff would otherwise be deleted up to ~24h early.
+
+> Rolling back to 1.x after running 2.x is possible — v1 reads the v2 rows, and its
+> migration runner ignores the unknown version 9 — with one degradation: `/health`
+> can no longer compute the age of a run stamped by v2 (it appends a second `Z`
+> before parsing), so staleness detection goes quiet until a v1 run is recorded.
+
+### Switching to PostgreSQL
+
+```ts
+import { createPostgresStore } from '@shopimind/integration-kit-js/store-postgres';
+
+const app = await createIntegrationApp(integration, {
+  store: await createPostgresStore({
+    connectionString: process.env.DATABASE_URL!,
+    schema: 'shopimind_myintegration',
+  }),
+  // ...same options as before
+});
+```
+
+Operational notes: the kit remains **single-replica per integration** (the sync
+scheduler and overlap locks are per-process — PostgreSQL does not change that);
+for scale-to-zero deployments disable `autoSync` and trigger syncs from an
+external cron via `POST /admin/sync/{id}` or `app.runSyncOnce()`.
+
 ## 1.6.0
 
 Operations console (`/admin/ui`) overhaul, plus an integration **Definition** view.

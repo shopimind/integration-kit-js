@@ -27,13 +27,13 @@ export interface AdminRouteDeps {
   /** Write-side provider (purge, reveal, reprovision, audit). Absent -> mutations return 501. */
   actions?: AdminActions;
   /** JSON overview across installations. */
-  overview?(): object;
+  overview?(): Promise<object>;
   /** Scoped dead-letter for one installation, RAW payloads, operator-only. */
-  rejectedItems?(id: string, limit: number): unknown;
+  rejectedItems?(id: string, limit: number): Promise<unknown>;
   /** Triggers a sync for an installation (`full` = full backfill). */
   runSyncForInstall(id: string, full: boolean): Promise<unknown>;
   /** Recent runs for an installation. */
-  recentRuns(id: string): unknown;
+  recentRuns(id: string): Promise<unknown>;
 }
 
 const query = (req: Request): Record<string, unknown> => (req.query as Record<string, unknown> | undefined) ?? {};
@@ -157,17 +157,17 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
       method: 'POST',
       path: '/admin/session',
       options: { payload: { parse: false, maxBytes: 4 * 1024 } },
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         if (deps.adminRateLimit && !deps.adminRateLimit(clientIp(req)))
           return h.response({ success: false, error: 'rate_limited' }).code(429);
         if (!deps.sessions) return h.response({ success: false, error: 'not_supported' }).code(501);
         const token = readToken(req);
         if (!deps.adminToken || !token || !constantTimeEqual(token, deps.adminToken)) {
-          if (deps.actions) deps.actions.audit({ action: 'login.failed', ip: clientIp(req) });
+          if (deps.actions) await deps.actions.audit({ action: 'login.failed', ip: clientIp(req) });
           return h.response({ success: false, error: 'unauthorized' }).code(401);
         }
         const { sid, csrf } = deps.sessions.create(clientIp(req));
-        if (deps.actions) deps.actions.audit({ action: 'login', ip: clientIp(req) });
+        if (deps.actions) await deps.actions.audit({ action: 'login', ip: clientIp(req) });
         return h
           .response({ success: true, csrf })
           .code(200)
@@ -193,10 +193,10 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
     {
       method: 'GET',
       path: '/admin/meta',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
-        return h.response(deps.data.meta()).code(200);
+        return h.response(await deps.data.meta()).code(200);
       },
     },
     // ---- Read: integration definition (what the integration declares) --------
@@ -213,14 +213,14 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
     {
       method: 'GET',
       path: '/admin/installations',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         const q = query(req);
         const { limit, offset } = pageParams(req);
         return h
           .response(
-            deps.data.listInstallations({
+            await deps.data.listInstallations({
               ...(str(q.status) ? { status: str(q.status) } : {}),
               ...(str(q.q) ? { q: str(q.q) } : {}),
               limit,
@@ -234,12 +234,12 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
     {
       method: 'GET',
       path: '/admin/installations/{id}',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         const id = idOf(req);
         if (!id) return h.response({ success: false, error: 'invalid_id' }).code(400);
-        const detail = deps.data.installation(id);
+        const detail = await deps.data.installation(id);
         if (!detail) return h.response({ success: false, error: 'not_found' }).code(404);
         return h.response(detail).code(200);
       },
@@ -248,31 +248,31 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
     {
       method: 'GET',
       path: '/admin/installations/{id}/cursors',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         const id = idOf(req);
         if (!id) return h.response({ success: false, error: 'invalid_id' }).code(400);
-        return h.response({ items: deps.data.cursors(id) }).code(200);
+        return h.response({ items: await deps.data.cursors(id) }).code(200);
       },
     },
     // ---- Read: sync runs of an installation ---------------------------------
     {
       method: 'GET',
       path: '/admin/installations/{id}/runs',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         const id = idOf(req);
         if (!id) return h.response({ success: false, error: 'invalid_id' }).code(400);
-        return h.response(deps.data.runs(id, pageParams(req))).code(200);
+        return h.response(await deps.data.runs(id, pageParams(req))).code(200);
       },
     },
     // ---- Read: webhook log of an installation (PII masked) ------------------
     {
       method: 'GET',
       path: '/admin/installations/{id}/webhooks',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         const id = idOf(req);
@@ -281,7 +281,7 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
         const sig = boolParam(q.signatureOk);
         return h
           .response(
-            deps.data.webhooks(id, {
+            await deps.data.webhooks(id, {
               ...(str(q.event) ? { event: str(q.event) } : {}),
               ...(sig !== undefined ? { signatureOk: sig } : {}),
               ...pageParams(req),
@@ -294,38 +294,38 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
     {
       method: 'GET',
       path: '/admin/installations/{id}/inbound',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         const id = idOf(req);
         if (!id) return h.response({ success: false, error: 'invalid_id' }).code(400);
-        return h.response(deps.data.inbound(id, pageParams(req))).code(200);
+        return h.response(await deps.data.inbound(id, pageParams(req))).code(200);
       },
     },
     // ---- Read: state metadata (NEVER the secret values) ---------------------
     {
       method: 'GET',
       path: '/admin/installations/{id}/state',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         const id = idOf(req);
         if (!id) return h.response({ success: false, error: 'invalid_id' }).code(400);
-        return h.response({ items: deps.data.state(id) }).code(200);
+        return h.response({ items: await deps.data.state(id) }).code(200);
       },
     },
     // ---- Read: global dead-letter (filterable, PII masked) ------------------
     {
       method: 'GET',
       path: '/admin/rejected',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         const q = query(req);
         const sinceDays = clampInt(q.sinceDays, 0, 0, 3650);
         return h
           .response(
-            deps.data.rejected({
+            await deps.data.rejected({
               ...(str(q.installationId) ? { installationId: str(q.installationId) } : {}),
               ...(str(q.entity) ? { entity: str(q.entity) } : {}),
               ...(sinceDays > 0 ? { sinceDays } : {}),
@@ -340,10 +340,10 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
     {
       method: 'GET',
       path: '/admin/audit',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
-        return h.response(deps.data.audit(pageParams(req))).code(200);
+        return h.response(await deps.data.audit(pageParams(req))).code(200);
       },
     },
 
@@ -351,17 +351,17 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
     {
       method: 'GET',
       path: '/admin/overview',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         if (!deps.overview) return h.response({ success: false, error: 'not_supported' }).code(501);
-        return h.response(deps.overview()).code(200);
+        return h.response(await deps.overview()).code(200);
       },
     },
     {
       method: 'GET',
       path: '/admin/installations/{id}/rejected',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         if (!deps.rejectedItems) return h.response({ success: false, error: 'not_supported' }).code(501);
@@ -370,7 +370,7 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
         // Bounded: default 100, hard cap 500 (the repo clamps again defensively).
         const rawLimit = Number(query(req).limit ?? 100);
         const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 500)) : 100;
-        return h.response({ items: deps.rejectedItems(id, limit) }).code(200);
+        return h.response({ items: await deps.rejectedItems(id, limit) }).code(200);
       },
     },
     {
@@ -385,19 +385,19 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
         // `?full=true` forces a full backfill (initial re-sync); default = incremental.
         const full = String(query(req).full ?? '') === 'true';
         const summary = await deps.runSyncForInstall(id, full);
-        if (deps.actions) deps.actions.audit({ action: 'sync', installationId: id, target: id, details: { full }, ip: clientIp(req) });
+        if (deps.actions) await deps.actions.audit({ action: 'sync', installationId: id, target: id, details: { full }, ip: clientIp(req) });
         return h.response({ success: true, summary }).code(200);
       },
     },
     {
       method: 'GET',
       path: '/admin/status/{id}',
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = denied(req, h, deps);
         if (no) return no;
         const id = idOf(req);
         if (!id) return h.response({ success: false, error: 'invalid_id' }).code(400);
-        return h.response({ runs: deps.recentRuns(id) }).code(200);
+        return h.response({ runs: await deps.recentRuns(id) }).code(200);
       },
     },
 
@@ -414,7 +414,7 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
         if (!id) return h.response({ success: false, error: 'invalid_id' }).code(400);
         try {
           const outcome = await deps.actions.reprovision(id);
-          deps.actions.audit({
+          await deps.actions.audit({
             action: 'reprovision',
             installationId: id,
             target: id,
@@ -431,7 +431,7 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
       method: 'POST',
       path: '/admin/rejected/purge',
       options: { payload: { parse: false, maxBytes: 32 * 1024 } },
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = deniedMutation(req, h, deps);
         if (no) return no;
         if (!deps.actions) return h.response({ success: false, error: 'not_supported' }).code(501);
@@ -439,8 +439,8 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
         const installationId = typeof body.installationId === 'string' ? body.installationId : '';
         const ids = Array.isArray(body.ids) ? (body.ids as unknown[]).filter((n): n is number => Number.isInteger(n)) : [];
         if (!installationId || ids.length === 0) return h.response({ success: false, error: 'invalid_request' }).code(400);
-        const removed = deps.actions.purgeRejected(installationId, ids);
-        deps.actions.audit({ action: 'rejected.purge', installationId, target: installationId, details: { requested: ids.length, removed }, ip: clientIp(req) });
+        const removed = await deps.actions.purgeRejected(installationId, ids);
+        await deps.actions.audit({ action: 'rejected.purge', installationId, target: installationId, details: { requested: ids.length, removed }, ip: clientIp(req) });
         return h.response({ success: true, removed }).code(200);
       },
     },
@@ -448,15 +448,15 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
       method: 'POST',
       path: '/admin/rejected/{id}/reveal',
       options: { payload: { parse: false, maxBytes: 4 * 1024 } },
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = deniedMutation(req, h, deps);
         if (no) return no;
         if (!deps.actions) return h.response({ success: false, error: 'not_supported' }).code(501);
         const rid = Number(req.params.id);
         if (!Number.isInteger(rid)) return h.response({ success: false, error: 'invalid_id' }).code(400);
-        const row = deps.actions.revealRejected(rid);
+        const row = await deps.actions.revealRejected(rid);
         if (!row) return h.response({ success: false, error: 'not_found' }).code(404);
-        deps.actions.audit({ action: 'rejected.reveal', installationId: row.installation_id, target: String(rid), ip: clientIp(req) });
+        await deps.actions.audit({ action: 'rejected.reveal', installationId: row.installation_id, target: String(rid), ip: clientIp(req) });
         return h.response({ success: true, payload_json: row.payload_json }).code(200);
       },
     },
@@ -464,16 +464,16 @@ export function buildAdminRoutes(deps: AdminRouteDeps): ServerRoute[] {
       method: 'POST',
       path: '/admin/installations/{id}/webhook-log/{logId}/reveal',
       options: { payload: { parse: false, maxBytes: 4 * 1024 } },
-      handler: (req: Request, h: ResponseToolkit) => {
+      handler: async (req: Request, h: ResponseToolkit) => {
         const no = deniedMutation(req, h, deps);
         if (no) return no;
         if (!deps.actions) return h.response({ success: false, error: 'not_supported' }).code(501);
         const id = idOf(req);
         const logId = Number(req.params.logId);
         if (!id || !Number.isInteger(logId)) return h.response({ success: false, error: 'invalid_id' }).code(400);
-        const row = deps.actions.revealWebhook(id, logId);
+        const row = await deps.actions.revealWebhook(id, logId);
         if (!row) return h.response({ success: false, error: 'not_found' }).code(404);
-        deps.actions.audit({ action: 'webhook.reveal', installationId: id, target: String(logId), ip: clientIp(req) });
+        await deps.actions.audit({ action: 'webhook.reveal', installationId: id, target: String(logId), ip: clientIp(req) });
         return h.response({ success: true, payload_json: row.payload_json }).code(200);
       },
     },

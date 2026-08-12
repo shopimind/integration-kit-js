@@ -15,6 +15,25 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    services:
+      # Real PostgreSQL, same as CI. `yarn test` below is the last gate before
+      # publishing: without TEST_POSTGRES_URL the PostgreSQL suites skip silently
+      # and a release could ship an untested adapter.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kit
+          POSTGRES_PASSWORD: kit
+          POSTGRES_DB: kit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kit"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgres://kit:kit@localhost:5432/kit_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

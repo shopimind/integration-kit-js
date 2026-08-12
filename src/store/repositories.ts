@@ -1,5 +1,6 @@
-import type DatabaseT from 'better-sqlite3';
 import type { SecretCipher } from '../security/crypto.js';
+import type { IntegrationStore } from './port.js';
+import { isoDaysAgo, isoHoursAgo, realClock, type StoreClock } from './time.js';
 import type {
   InstallRow,
   InstallUpsert,
@@ -12,313 +13,202 @@ import type {
   AuditRow,
 } from './types.js';
 
-const nn = <T>(v: T | undefined): T | null => (v === undefined ? null : v);
+/**
+ * KIT-SIDE FACADES over the persistence port (`IntegrationStore`).
+ *
+ * Everything that is kit LOGIC — and must therefore behave identically on every
+ * backend — lives here, ABOVE the port: secret encryption (AES-256-GCM with a
+ * location-binding AAD), defensive JSON serialization, pagination clamping,
+ * relative-window → absolute-cutoff conversion. Adapters only ever do storage.
+ *
+ * The facade classes keep the v1 repository names and shapes; every method is
+ * now async (the port is Promise-based so network backends can implement it).
+ */
 
 /** GCM AAD binding an encrypted secret to its exact location (anti-relocation). */
 const aadFor = (installationId: string, key: string): string => `${installationId}:${key}`;
 
-/** Escapes LIKE metacharacters (`%`, `_`, `\`) so a search term matches literally. */
-const likeEscape = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+/**
+ * Pagination bounds. These must yield INTEGERS: they are bound to `LIMIT`/`OFFSET`
+ * parameters, and a fractional/NaN value is silently tolerated by SQLite but
+ * rejected by PostgreSQL (`invalid input syntax for type bigint`). Clamping here —
+ * above the port — keeps both adapters behaving the same on hostile input.
+ */
+/** Upper bound of a 32-bit signed column — the id type used by both official adapters. */
+const INT4_MAX = 2_147_483_647;
+const toInt = (v: number, fallback: number): number => (Number.isFinite(v) ? Math.floor(v) : fallback);
+const clampLimit = (limit: number, max: number): number => Math.max(1, Math.min(toInt(limit, 1), max));
+const clampOffset = (offset: number): number => Math.max(0, Math.min(toInt(offset, 0), Number.MAX_SAFE_INTEGER));
 
 /** Installs (one row per installation). COALESCE upsert: a null field does not overwrite. */
 export class InstallRepo {
-  constructor(private readonly db: DatabaseT.Database) {}
+  constructor(private readonly store: IntegrationStore) {}
 
-  upsert(u: InstallUpsert): void {
-    this.db
-      .prepare(
-        `INSERT INTO installs
-           (installation_id, shop_domain, shop_name, status, installed_at, updated_at)
-         VALUES
-           (@installation_id, @shop_domain, @shop_name, @status, @installed_at, datetime('now'))
-         ON CONFLICT(installation_id) DO UPDATE SET
-           shop_domain  = COALESCE(excluded.shop_domain, shop_domain),
-           shop_name    = COALESCE(excluded.shop_name, shop_name),
-           status       = excluded.status,
-           installed_at = COALESCE(excluded.installed_at, installed_at),
-           updated_at   = datetime('now')`,
-      )
-      .run({
-        installation_id: u.installation_id,
-        shop_domain: nn(u.shop_domain),
-        shop_name: nn(u.shop_name),
-        status: u.status,
-        installed_at: nn(u.installed_at),
-      });
+  upsert(u: InstallUpsert): Promise<void> {
+    return this.store.installs.upsert(u);
   }
 
   setStatus(
     installationId: string,
     status: InstallRow['status'],
     stamps: { activated_at?: string | null; deactivated_at?: string | null; uninstalled_at?: string | null } = {},
-  ): void {
-    this.db
-      .prepare(
-        `UPDATE installs SET
-           status         = @status,
-           activated_at   = @activated_at,
-           deactivated_at = @deactivated_at,
-           uninstalled_at = @uninstalled_at,
-           updated_at     = datetime('now')
-         WHERE installation_id = @installation_id`,
-      )
-      .run({
-        installation_id: installationId,
-        status,
-        activated_at: nn(stamps.activated_at),
-        deactivated_at: nn(stamps.deactivated_at),
-        uninstalled_at: nn(stamps.uninstalled_at),
-      });
+  ): Promise<void> {
+    return this.store.installs.setStatus(installationId, status, stamps);
   }
 
   /** Sets the INTEGRATOR account associated with the installation (the correlation bridge). */
-  setExternalAccount(installationId: string, ref: string | null, name: string | null = null): void {
-    this.db
-      .prepare(
-        `UPDATE installs SET
-           external_account_ref  = @ref,
-           external_account_name = @name,
-           updated_at            = datetime('now')
-         WHERE installation_id = @installation_id`,
-      )
-      .run({ installation_id: installationId, ref: nn(ref), name: nn(name) });
+  setExternalAccount(installationId: string, ref: string | null, name: string | null = null): Promise<void> {
+    return this.store.installs.setExternalAccount(installationId, ref, name);
   }
 
-  find(installationId: string): InstallRow | undefined {
-    return this.db
-      .prepare('SELECT * FROM installs WHERE installation_id = ?')
-      .get(installationId) as InstallRow | undefined;
+  find(installationId: string): Promise<InstallRow | undefined> {
+    return this.store.installs.find(installationId);
   }
 
-  listActive(): InstallRow[] {
-    return this.db.prepare(`SELECT * FROM installs WHERE status = 'active'`).all() as InstallRow[];
+  listActive(): Promise<InstallRow[]> {
+    return this.store.installs.listActive();
   }
 
-  /** Paginated list for the admin UI. `q` = case-insensitive LIKE across id/domain/name. */
-  list(f: { status?: string; q?: string; limit: number; offset: number }): { items: InstallRow[]; total: number } {
-    const where: string[] = [];
-    const params: Record<string, unknown> = {};
-    if (f.status) {
-      where.push('status = @status');
-      params.status = f.status;
-    }
-    if (f.q) {
-      where.push(`(installation_id LIKE @q ESCAPE '\\' OR shop_domain LIKE @q ESCAPE '\\' OR shop_name LIKE @q ESCAPE '\\')`);
-      params.q = `%${likeEscape(f.q)}%`;
-    }
-    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const total = (this.db.prepare(`SELECT COUNT(*) AS n FROM installs ${clause}`).get(params) as { n: number }).n;
-    const limit = Math.max(1, Math.min(f.limit, 200));
-    const items = this.db
-      .prepare(`SELECT * FROM installs ${clause} ORDER BY updated_at DESC LIMIT @limit OFFSET @offset`)
-      .all({ ...params, limit, offset: Math.max(0, f.offset) }) as InstallRow[];
-    return { items, total };
+  /** Paginated list for the admin UI. `q` = case-insensitive substring across id/domain/name. */
+  list(f: { status?: string; q?: string; limit: number; offset: number }): Promise<{ items: InstallRow[]; total: number }> {
+    return this.store.installs.list({
+      ...(f.status !== undefined ? { status: f.status } : {}),
+      ...(f.q !== undefined ? { q: f.q } : {}),
+      limit: clampLimit(f.limit, 200),
+      offset: clampOffset(f.offset),
+    });
   }
 
   /** Count per status (dashboard). */
-  countByStatus(): Record<string, number> {
-    const rows = this.db
-      .prepare('SELECT status, COUNT(*) AS n FROM installs GROUP BY status')
-      .all() as Array<{ status: string; n: number }>;
-    const out: Record<string, number> = {};
-    for (const r of rows) out[r.status] = r.n;
-    return out;
+  countByStatus(): Promise<Record<string, number>> {
+    return this.store.installs.countByStatus();
   }
 }
 
 /** Webhook log. The `payload_json` MUST already be redacted by the runtime. */
 export class WebhookLogRepo {
-  constructor(private readonly db: DatabaseT.Database) {}
+  constructor(
+    private readonly store: IntegrationStore,
+    private readonly clock: StoreClock,
+  ) {}
 
   log(entry: {
     event: string | null;
     installation_id?: string | null;
     signature_ok: boolean;
     payload_json: string;
-  }): void {
-    this.db
-      .prepare(
-        `INSERT INTO webhook_log (event, installation_id, signature_ok, payload_json)
-         VALUES (@event, @installation_id, @signature_ok, @payload_json)`,
-      )
-      .run({
-        event: nn(entry.event),
-        installation_id: nn(entry.installation_id),
-        signature_ok: entry.signature_ok ? 1 : 0,
-        payload_json: entry.payload_json,
-      });
+  }): Promise<void> {
+    return this.store.webhookLog.log({
+      event: entry.event,
+      installation_id: entry.installation_id ?? null,
+      signature_ok: entry.signature_ok,
+      payload_json: entry.payload_json,
+    });
   }
 
   /** Retention: deletes log rows older than `days` days. Returns the number of rows removed. */
-  purgeOlderThan(days: number): number {
-    return this.db
-      .prepare(`DELETE FROM webhook_log WHERE created_at < datetime('now', @cutoff)`)
-      .run({ cutoff: `-${days} days` }).changes;
+  purgeOlderThan(days: number): Promise<number> {
+    return this.store.webhookLog.purgeCreatedBefore(isoDaysAgo(days, this.clock));
   }
 
   /** Most recent webhook log entries (newest first) — for /admin/overview. */
-  recent(limit = 20): Array<{ event: string | null; installation_id: string | null; signature_ok: number; created_at: string }> {
-    const capped = Math.max(1, Math.min(limit, 200));
-    return this.db
-      .prepare('SELECT event, installation_id, signature_ok, created_at FROM webhook_log ORDER BY id DESC LIMIT ?')
-      .all(capped) as Array<{ event: string | null; installation_id: string | null; signature_ok: number; created_at: string }>;
+  recent(limit = 20): Promise<Array<{ event: string | null; installation_id: string | null; signature_ok: number; created_at: string }>> {
+    return this.store.webhookLog.recent(clampLimit(limit, 200));
   }
 
   /** Paginated webhook log for one installation (newest first). Payloads masked by the caller. */
   listByInstallation(
     id: string,
     f: { event?: string; signatureOk?: boolean; limit: number; offset: number },
-  ): { items: WebhookLogRow[]; total: number } {
-    const where = ['installation_id = @id'];
-    const params: Record<string, unknown> = { id };
-    if (f.event) {
-      where.push('event = @event');
-      params.event = f.event;
-    }
-    if (f.signatureOk !== undefined) {
-      where.push('signature_ok = @sig');
-      params.sig = f.signatureOk ? 1 : 0;
-    }
-    const clause = `WHERE ${where.join(' AND ')}`;
-    const total = (this.db.prepare(`SELECT COUNT(*) AS n FROM webhook_log ${clause}`).get(params) as { n: number }).n;
-    const limit = Math.max(1, Math.min(f.limit, 200));
-    const items = this.db
-      .prepare(`SELECT * FROM webhook_log ${clause} ORDER BY id DESC LIMIT @limit OFFSET @offset`)
-      .all({ ...params, limit, offset: Math.max(0, f.offset) }) as WebhookLogRow[];
-    return { items, total };
+  ): Promise<{ items: WebhookLogRow[]; total: number }> {
+    return this.store.webhookLog.listByInstallation(id, {
+      ...(f.event !== undefined ? { event: f.event } : {}),
+      ...(f.signatureOk !== undefined ? { signatureOk: f.signatureOk } : {}),
+      limit: clampLimit(f.limit, 200),
+      offset: clampOffset(f.offset),
+    });
   }
 
   /** Dashboard counter: webhooks received in the last `hours`, and how many were refused. */
-  countSince(hours: number): { total: number; refused: number } {
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(*) AS total, SUM(CASE WHEN signature_ok = 0 THEN 1 ELSE 0 END) AS refused
-         FROM webhook_log WHERE created_at >= datetime('now', @cutoff)`,
-      )
-      .get({ cutoff: `-${hours} hours` }) as { total: number; refused: number | null };
-    return { total: row.total, refused: row.refused ?? 0 };
+  countSince(hours: number): Promise<{ total: number; refused: number }> {
+    return this.store.webhookLog.countSince(isoHoursAgo(hours, this.clock));
   }
 
   /** Last webhook event seen for an installation (lifecycle timeline). */
-  lastForInstallation(id: string): { event: string | null; created_at: string } | undefined {
-    return this.db
-      .prepare('SELECT event, created_at FROM webhook_log WHERE installation_id = ? ORDER BY id DESC LIMIT 1')
-      .get(id) as { event: string | null; created_at: string } | undefined;
+  lastForInstallation(id: string): Promise<{ event: string | null; created_at: string } | undefined> {
+    return this.store.webhookLog.lastForInstallation(id);
   }
 
   /** Single webhook log row by id (installation scoping is enforced by the caller). */
-  findById(id: number): WebhookLogRow | undefined {
-    return this.db.prepare('SELECT * FROM webhook_log WHERE id = ?').get(id) as WebhookLogRow | undefined;
+  findById(id: number): Promise<WebhookLogRow | undefined> {
+    if (!Number.isInteger(id) || Math.abs(id) > INT4_MAX) return Promise.resolve(undefined);
+    return this.store.webhookLog.findById(id);
   }
 }
 
 /** Replay protection for lifecycle webhooks (key derived from the signature). */
 export class WebhookSeenRepo {
-  constructor(private readonly db: DatabaseT.Database) {}
+  constructor(
+    private readonly store: IntegrationStore,
+    private readonly clock: StoreClock,
+  ) {}
 
   /** Atomically claims processing; `false` if the signature was already seen (replay). */
-  claim(installationId: string, dedupKey: string): boolean {
-    const info = this.db
-      .prepare(
-        `INSERT INTO webhook_seen (installation_id, dedup_key) VALUES (?, ?)
-         ON CONFLICT(installation_id, dedup_key) DO NOTHING`,
-      )
-      .run(installationId, dedupKey);
-    return info.changes === 1;
+  claim(installationId: string, dedupKey: string): Promise<boolean> {
+    return this.store.webhookSeen.claim(installationId, dedupKey);
   }
 
   /** Releases a claim (failed processing) -> an identical resend can retry. */
-  release(installationId: string, dedupKey: string): void {
-    this.db
-      .prepare('DELETE FROM webhook_seen WHERE installation_id = ? AND dedup_key = ?')
-      .run(installationId, dedupKey);
+  release(installationId: string, dedupKey: string): Promise<void> {
+    return this.store.webhookSeen.release(installationId, dedupKey);
   }
 
   /** Retention: deletes dedup rows older than `days` days. Returns the number of rows removed. */
-  purgeOlderThan(days: number): number {
-    return this.db
-      .prepare(`DELETE FROM webhook_seen WHERE created_at < datetime('now', @cutoff)`)
-      .run({ cutoff: `-${days} days` }).changes;
+  purgeOlderThan(days: number): Promise<number> {
+    return this.store.webhookSeen.purgeCreatedBefore(isoDaysAgo(days, this.clock));
   }
 
   /** Count of retained signatures for an installation over the last `days` (idempotence view). */
-  countByInstallationSince(id: string, days: number): number {
-    return (
-      this.db
-        .prepare(`SELECT COUNT(*) AS n FROM webhook_seen WHERE installation_id = ? AND created_at >= datetime('now', ?)`)
-        .get(id, `-${days} days`) as { n: number }
-    ).n;
+  countByInstallationSince(id: string, days: number): Promise<number> {
+    return this.store.webhookSeen.countByInstallationSince(id, isoDaysAgo(days, this.clock));
   }
 }
 
 /** Sync cursors, scoped by (installation, entity, source_key). */
 export class CursorRepo {
-  constructor(private readonly db: DatabaseT.Database) {}
+  constructor(private readonly store: IntegrationStore) {}
 
-  get(installationId: string, entity: string, sourceKey = ''): CursorRow | undefined {
-    return this.db
-      .prepare('SELECT * FROM sync_cursor WHERE installation_id = ? AND entity = ? AND source_key = ?')
-      .get(installationId, entity, sourceKey) as CursorRow | undefined;
+  get(installationId: string, entity: string, sourceKey = ''): Promise<CursorRow | undefined> {
+    return this.store.cursors.get(installationId, entity, sourceKey);
   }
 
-  set(installationId: string, entity: string, sourceKey: string, w: CursorWrite): void {
-    this.db
-      .prepare(
-        `INSERT INTO sync_cursor
-           (installation_id, entity, source_key, last_synced_at, last_status, last_error, items,
-            consecutive_failures, updated_at)
-         VALUES
-           (@installation_id, @entity, @source_key, @last_synced_at, @last_status, @last_error, @items,
-            COALESCE(@consecutive_failures, 0), datetime('now'))
-         ON CONFLICT(installation_id, entity, source_key) DO UPDATE SET
-           last_synced_at = excluded.last_synced_at,
-           last_status    = excluded.last_status,
-           last_error     = excluded.last_error,
-           items          = excluded.items,
-           -- Omitted (@consecutive_failures IS NULL) -> keep the existing counter.
-           consecutive_failures = COALESCE(@consecutive_failures, sync_cursor.consecutive_failures),
-           updated_at     = datetime('now')`,
-      )
-      .run({
-        installation_id: installationId,
-        entity,
-        source_key: sourceKey,
-        last_synced_at: w.last_synced_at,
-        last_status: nn(w.last_status),
-        last_error: nn(w.last_error),
-        items: w.items ?? 0,
-        consecutive_failures: nn(w.consecutive_failures),
-      });
+  set(installationId: string, entity: string, sourceKey: string, w: CursorWrite): Promise<void> {
+    return this.store.cursors.set(installationId, entity, sourceKey, w);
   }
 
   /** All cursors for an installation (for /health, /admin/overview). */
-  listByInstallation(installationId: string): CursorRow[] {
-    return this.db
-      .prepare('SELECT * FROM sync_cursor WHERE installation_id = ? ORDER BY entity, source_key')
-      .all(installationId) as CursorRow[];
+  listByInstallation(installationId: string): Promise<CursorRow[]> {
+    return this.store.cursors.listByInstallation(installationId);
   }
 
   /** Number of cursors currently in the `error` status (health signal). */
-  countInError(): number {
-    const row = this.db
-      .prepare(`SELECT COUNT(*) AS n FROM sync_cursor WHERE last_status = 'error'`)
-      .get() as { n: number };
-    return row.n;
+  countInError(): Promise<number> {
+    return this.store.cursors.countInError();
   }
 }
 
 /** History of sync runs. */
 export class RunRepo {
-  constructor(private readonly db: DatabaseT.Database) {}
+  constructor(
+    private readonly store: IntegrationStore,
+    private readonly clock: StoreClock,
+  ) {}
 
-  start(installationId: string): number {
-    const info = this.db
-      .prepare(`INSERT INTO sync_run (installation_id, status) VALUES (?, 'running')`)
-      .run(installationId);
-    return Number(info.lastInsertRowid);
+  start(installationId: string): Promise<number> {
+    return this.store.runs.start(installationId);
   }
 
-  finish(runId: number, status: 'ok' | 'partial' | 'failed', summary: unknown): void {
+  finish(runId: number, status: 'ok' | 'partial' | 'failed', summary: unknown): Promise<void> {
     // Never let a non-serializable summary (circular reference, BigInt, …) throw and
     // leave the run stuck in 'running': fall back to a safe placeholder instead.
     let summaryJson: string;
@@ -327,165 +217,112 @@ export class RunRepo {
     } catch {
       summaryJson = '{"error":"unserializable summary"}';
     }
-    this.db
-      .prepare(`UPDATE sync_run SET status = @status, summary_json = @summary_json, finished_at = datetime('now') WHERE id = @id`)
-      .run({ id: runId, status, summary_json: summaryJson });
+    return this.store.runs.finish(runId, status, summaryJson);
   }
 
-  recent(installationId: string, limit = 10): SyncRunRow[] {
-    const capped = Math.max(1, Math.min(limit, 200));
-    return this.db
-      .prepare('SELECT * FROM sync_run WHERE installation_id = ? ORDER BY id DESC LIMIT ?')
-      .all(installationId, capped) as SyncRunRow[];
+  recent(installationId: string, limit = 10): Promise<SyncRunRow[]> {
+    return this.store.runs.recent(installationId, clampLimit(limit, 200));
   }
 
   /** Paginated runs for an installation (newest first) + total. */
-  list(id: string, f: { limit: number; offset: number }): { items: SyncRunRow[]; total: number } {
-    const total = (this.db.prepare('SELECT COUNT(*) AS n FROM sync_run WHERE installation_id = ?').get(id) as { n: number }).n;
-    const limit = Math.max(1, Math.min(f.limit, 200));
-    const items = this.db
-      .prepare('SELECT * FROM sync_run WHERE installation_id = ? ORDER BY id DESC LIMIT ? OFFSET ?')
-      .all(id, limit, Math.max(0, f.offset)) as SyncRunRow[];
-    return { items, total };
+  list(id: string, f: { limit: number; offset: number }): Promise<{ items: SyncRunRow[]; total: number }> {
+    return this.store.runs.list(id, { limit: clampLimit(f.limit, 200), offset: clampOffset(f.offset) });
   }
 
   /** Retention: deletes run rows older than `days` days. Returns rows removed. */
-  purgeOlderThan(days: number): number {
-    return this.db
-      .prepare(`DELETE FROM sync_run WHERE started_at < datetime('now', @cutoff)`)
-      .run({ cutoff: `-${days} days` }).changes;
+  purgeOlderThan(days: number): Promise<number> {
+    return this.store.runs.purgeStartedBefore(isoDaysAgo(days, this.clock));
   }
 }
 
 /**
  * Private integration state (KV per installation). Sensitive values are encrypted
- * at rest via the kit's `SecretCipher`.
+ * at rest via the kit's `SecretCipher` — encryption happens HERE, above the port:
+ * a storage adapter only ever sees opaque blobs.
  */
 export class IntegrationStateRepo {
   constructor(
-    private readonly db: DatabaseT.Database,
+    private readonly store: IntegrationStore,
     private readonly cipher: SecretCipher,
   ) {}
 
-  private write(installationId: string, key: string, value: string, encrypted: boolean): void {
-    this.db
-      .prepare(
-        `INSERT INTO integration_state (installation_id, key, value, encrypted, updated_at)
-         VALUES (@id, @key, @value, @encrypted, datetime('now'))
-         ON CONFLICT(installation_id, key) DO UPDATE SET
-           value = excluded.value, encrypted = excluded.encrypted, updated_at = datetime('now')`,
-      )
-      .run({ id: installationId, key, value, encrypted: encrypted ? 1 : 0 });
+  set(installationId: string, key: string, value: string): Promise<void> {
+    return this.store.state.write(installationId, key, value, false);
   }
 
-  set(installationId: string, key: string, value: string): void {
-    this.write(installationId, key, value, false);
+  setSecret(installationId: string, key: string, value: string): Promise<void> {
+    return this.store.state.write(installationId, key, this.cipher.encrypt(value, aadFor(installationId, key)), true);
   }
 
-  setSecret(installationId: string, key: string, value: string): void {
-    this.write(installationId, key, this.cipher.encrypt(value, aadFor(installationId, key)), true);
+  async get(installationId: string, key: string): Promise<string | null> {
+    const entry = await this.store.state.read(installationId, key);
+    if (!entry || entry.value === null) return null;
+    return entry.encrypted ? this.cipher.decrypt(entry.value, aadFor(installationId, key)) : entry.value;
   }
 
-  get(installationId: string, key: string): string | null {
-    const row = this.db
-      .prepare('SELECT value, encrypted FROM integration_state WHERE installation_id = ? AND key = ?')
-      .get(installationId, key) as { value: string | null; encrypted: number } | undefined;
-    if (!row || row.value === null) return null;
-    return row.encrypted ? this.cipher.decrypt(row.value, aadFor(installationId, key)) : row.value;
-  }
-
-  delete(installationId: string, key: string): void {
-    this.db
-      .prepare('DELETE FROM integration_state WHERE installation_id = ? AND key = ?')
-      .run(installationId, key);
+  delete(installationId: string, key: string): Promise<void> {
+    return this.store.state.delete(installationId, key);
   }
 
   /**
-   * Metadata for every state key of an installation — WITHOUT ever reading the value
-   * of an encrypted row. The `CASE` guarantees at the SQL level that a secret's value
-   * is never materialized: `value_preview` is NULL whenever `encrypted = 1`.
+   * Metadata for every state key of an installation — WITHOUT ever reading the
+   * value of an encrypted row (`value_preview` is null whenever `encrypted = 1`).
    */
-  listMeta(
+  async listMeta(
     installationId: string,
-  ): Array<{ key: string; encrypted: 0 | 1; updated_at: string; value_length: number; value_preview: string | null }> {
-    return this.db
-      .prepare(
-        `SELECT key,
-                encrypted,
-                updated_at,
-                COALESCE(length(value), 0) AS value_length,
-                CASE WHEN encrypted = 0 THEN substr(value, 1, 200) ELSE NULL END AS value_preview
-         FROM integration_state WHERE installation_id = ? ORDER BY key`,
-      )
-      .all(installationId) as Array<{
-      key: string;
-      encrypted: 0 | 1;
-      updated_at: string;
-      value_length: number;
-      value_preview: string | null;
-    }>;
+  ): Promise<Array<{ key: string; encrypted: 0 | 1; updated_at: string; value_length: number; value_preview: string | null }>> {
+    const rows = await this.store.state.listMeta(installationId);
+    return rows.map((r) => ({
+      key: r.key,
+      encrypted: r.encrypted ? (1 as const) : (0 as const),
+      updated_at: r.updated_at,
+      value_length: r.value_length,
+      // Belt-and-braces: enforce the port contract even against a misbehaving adapter.
+      value_preview: r.encrypted ? null : r.value_preview,
+    }));
   }
 }
 
 /** Log of inbound calls (middleware idempotency + audit). */
 export class InboundEventRepo {
-  constructor(private readonly db: DatabaseT.Database) {}
+  constructor(
+    private readonly store: IntegrationStore,
+    private readonly clock: StoreClock,
+  ) {}
 
-  find(installationId: string, idempotencyKey: string): InboundEventRow | undefined {
-    return this.db
-      .prepare('SELECT * FROM inbound_event WHERE installation_id = ? AND idempotency_key = ?')
-      .get(installationId, idempotencyKey) as InboundEventRow | undefined;
+  find(installationId: string, idempotencyKey: string): Promise<InboundEventRow | undefined> {
+    return this.store.inboundEvents.find(installationId, idempotencyKey);
   }
 
   /**
-   * ATOMICALLY claims the processing of an inbound call (anti-TOCTOU). The INSERT
-   * `ON CONFLICT DO NOTHING` relies on the UNIQUE index (installation_id, idempotency_key):
+   * ATOMICALLY claims the processing of an inbound call (anti-TOCTOU):
    * - `fresh: true` => row created by THIS call -> it is responsible for processing;
    * - `fresh: false` => a row already existed -> `status` tells where it stands
    *   ('received' = in progress/already claimed, 'done' = processed, 'failed' = retryable).
    */
-  claim(installationId: string, idempotencyKey: string, action: string | null): { rowId: number; fresh: boolean; status: InboundEventRow['status'] } {
-    const info = this.db
-      .prepare(
-        `INSERT INTO inbound_event (installation_id, idempotency_key, action, status)
-         VALUES (?, ?, ?, 'received')
-         ON CONFLICT(installation_id, idempotency_key) DO NOTHING`,
-      )
-      .run(installationId, idempotencyKey, nn(action));
-    if (info.changes === 1) return { rowId: Number(info.lastInsertRowid), fresh: true, status: 'received' };
-    const existing = this.find(installationId, idempotencyKey);
-    if (!existing) {
-      // Extreme race (row deleted between the INSERT and the SELECT): retry once.
-      const retry = this.db
-        .prepare(`INSERT INTO inbound_event (installation_id, idempotency_key, action, status) VALUES (?, ?, ?, 'received') ON CONFLICT(installation_id, idempotency_key) DO NOTHING`)
-        .run(installationId, idempotencyKey, nn(action));
-      const row = this.find(installationId, idempotencyKey);
-      return { rowId: row ? row.id : Number(retry.lastInsertRowid), fresh: retry.changes === 1, status: row ? row.status : 'received' };
-    }
-    return { rowId: existing.id, fresh: false, status: existing.status };
+  claim(
+    installationId: string,
+    idempotencyKey: string,
+    action: string | null,
+  ): Promise<{ rowId: number; fresh: boolean; status: InboundEventRow['status'] }> {
+    return this.store.inboundEvents.claim(installationId, idempotencyKey, action);
   }
 
-  finish(id: number, status: 'done' | 'failed', error: string | null = null): void {
-    this.db
-      .prepare(`UPDATE inbound_event SET status = @status, error = @error, processed_at = datetime('now') WHERE id = @id`)
-      .run({ id, status, error: nn(error) });
+  finish(id: number, status: 'done' | 'failed', error: string | null = null): Promise<void> {
+    return this.store.inboundEvents.finish(id, status, error);
   }
 
   /** Retention: deletes inbound rows older than `days` days. Returns the number of rows removed. */
-  purgeOlderThan(days: number): number {
-    return this.db
-      .prepare(`DELETE FROM inbound_event WHERE received_at < datetime('now', @cutoff)`)
-      .run({ cutoff: `-${days} days` }).changes;
+  purgeOlderThan(days: number): Promise<number> {
+    return this.store.inboundEvents.purgeReceivedBefore(isoDaysAgo(days, this.clock));
   }
 
   /** Paginated inbound events for an installation (newest first) + total. */
-  listByInstallation(id: string, f: { limit: number; offset: number }): { items: InboundEventRow[]; total: number } {
-    const total = (this.db.prepare('SELECT COUNT(*) AS n FROM inbound_event WHERE installation_id = ?').get(id) as { n: number }).n;
-    const limit = Math.max(1, Math.min(f.limit, 200));
-    const items = this.db
-      .prepare('SELECT * FROM inbound_event WHERE installation_id = ? ORDER BY id DESC LIMIT ? OFFSET ?')
-      .all(id, limit, Math.max(0, f.offset)) as InboundEventRow[];
-    return { items, total };
+  listByInstallation(id: string, f: { limit: number; offset: number }): Promise<{ items: InboundEventRow[]; total: number }> {
+    return this.store.inboundEvents.listByInstallation(id, {
+      limit: clampLimit(f.limit, 200),
+      offset: clampOffset(f.offset),
+    });
   }
 }
 
@@ -496,7 +333,10 @@ export class InboundEventRepo {
  * endpoint. Subject to the same retention purge as the other log tables.
  */
 export class RejectedItemRepo {
-  constructor(private readonly db: DatabaseT.Database) {}
+  constructor(
+    private readonly store: IntegrationStore,
+    private readonly clock: StoreClock,
+  ) {}
 
   add(entry: {
     installation_id: string;
@@ -505,118 +345,79 @@ export class RejectedItemRepo {
     source_key?: string | null;
     payload_json: string;
     reason?: string | null;
-  }): void {
-    this.db
-      .prepare(
-        `INSERT INTO rejected_item (installation_id, run_id, entity, source_key, payload_json, reason)
-         VALUES (@installation_id, @run_id, @entity, @source_key, @payload_json, @reason)`,
-      )
-      .run({
-        installation_id: entry.installation_id,
-        run_id: nn(entry.run_id),
-        entity: nn(entry.entity),
-        source_key: nn(entry.source_key),
-        payload_json: entry.payload_json,
-        reason: nn(entry.reason),
-      });
+  }): Promise<void> {
+    return this.store.rejectedItems.add({
+      installation_id: entry.installation_id,
+      run_id: entry.run_id ?? null,
+      entity: entry.entity ?? null,
+      source_key: entry.source_key ?? null,
+      payload_json: entry.payload_json,
+      reason: entry.reason ?? null,
+    });
   }
 
   /** Most recent rejected items for an installation, newest first (bounded). */
-  listByInstallation(installationId: string, limit = 100): RejectedItemRow[] {
-    const capped = Math.max(1, Math.min(limit, 500));
-    return this.db
-      .prepare('SELECT * FROM rejected_item WHERE installation_id = ? ORDER BY id DESC LIMIT ?')
-      .all(installationId, capped) as RejectedItemRow[];
+  listByInstallation(installationId: string, limit = 100): Promise<RejectedItemRow[]> {
+    return this.store.rejectedItems.listByInstallation(installationId, clampLimit(limit, 500));
   }
 
   /** Retention: deletes rejected-item rows older than `days` days. Returns rows removed. */
-  purgeOlderThan(days: number): number {
-    return this.db
-      .prepare(`DELETE FROM rejected_item WHERE created_at < datetime('now', @cutoff)`)
-      .run({ cutoff: `-${days} days` }).changes;
+  purgeOlderThan(days: number): Promise<number> {
+    return this.store.rejectedItems.purgeCreatedBefore(isoDaysAgo(days, this.clock));
   }
 
   /** Filtered, paginated dead-letter view (across installations or scoped). Payloads masked by the caller. */
   list(
     f: { installationId?: string; entity?: string; sinceDays?: number; q?: string; limit: number; offset: number },
-  ): { items: RejectedItemRow[]; total: number } {
-    const { where, params } = rejectedFilter(f);
-    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const total = (this.db.prepare(`SELECT COUNT(*) AS n FROM rejected_item ${clause}`).get(params) as { n: number }).n;
-    const limit = Math.max(1, Math.min(f.limit, 500));
-    const items = this.db
-      .prepare(`SELECT * FROM rejected_item ${clause} ORDER BY id DESC LIMIT @limit OFFSET @offset`)
-      .all({ ...params, limit, offset: Math.max(0, f.offset) }) as RejectedItemRow[];
-    return { items, total };
+  ): Promise<{ items: RejectedItemRow[]; total: number }> {
+    return this.store.rejectedItems.list({
+      ...(f.installationId !== undefined ? { installationId: f.installationId } : {}),
+      ...(f.entity !== undefined ? { entity: f.entity } : {}),
+      ...(f.sinceDays ? { sinceIso: isoDaysAgo(f.sinceDays, this.clock) } : {}),
+      ...(f.q !== undefined ? { q: f.q } : {}),
+      limit: clampLimit(f.limit, 500),
+      offset: clampOffset(f.offset),
+    });
   }
 
-  count(f: { installationId?: string; entity?: string; sinceDays?: number }): number {
-    const { where, params } = rejectedFilter(f);
-    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    return (this.db.prepare(`SELECT COUNT(*) AS n FROM rejected_item ${clause}`).get(params) as { n: number }).n;
+  count(f: { installationId?: string; entity?: string; sinceDays?: number }): Promise<number> {
+    return this.store.rejectedItems.count({
+      ...(f.installationId !== undefined ? { installationId: f.installationId } : {}),
+      ...(f.entity !== undefined ? { entity: f.entity } : {}),
+      ...(f.sinceDays ? { sinceIso: isoDaysAgo(f.sinceDays, this.clock) } : {}),
+    });
   }
 
   /** Count grouped by entity (dashboard breakdown), optionally scoped to one installation. */
-  countByEntity(installationId?: string): Array<{ entity: string | null; n: number }> {
-    if (installationId) {
-      return this.db
-        .prepare('SELECT entity, COUNT(*) AS n FROM rejected_item WHERE installation_id = ? GROUP BY entity ORDER BY n DESC')
-        .all(installationId) as Array<{ entity: string | null; n: number }>;
-    }
-    return this.db
-      .prepare('SELECT entity, COUNT(*) AS n FROM rejected_item GROUP BY entity ORDER BY n DESC')
-      .all() as Array<{ entity: string | null; n: number }>;
+  countByEntity(installationId?: string): Promise<Array<{ entity: string | null; n: number }>> {
+    return this.store.rejectedItems.countByEntity(installationId);
   }
 
   /** Single rejected item by id (for an audited reveal of the raw, un-masked payload). */
-  findById(id: number): RejectedItemRow | undefined {
-    return this.db.prepare('SELECT * FROM rejected_item WHERE id = ?').get(id) as RejectedItemRow | undefined;
+  findById(id: number): Promise<RejectedItemRow | undefined> {
+    if (!Number.isInteger(id) || Math.abs(id) > INT4_MAX) return Promise.resolve(undefined);
+    return this.store.rejectedItems.findById(id);
   }
 
   /** Deletes rejected items by id, SCOPED to the installation (never cross-tenant). Caps 500 ids. */
-  deleteByIds(installationId: string, ids: number[]): number {
-    const clean = ids.filter((n) => Number.isInteger(n)).slice(0, 500);
-    if (clean.length === 0) return 0;
-    const placeholders = clean.map(() => '?').join(',');
-    return this.db
-      .prepare(`DELETE FROM rejected_item WHERE installation_id = ? AND id IN (${placeholders})`)
-      .run(installationId, ...clean).changes;
+  deleteByIds(installationId: string, ids: number[]): Promise<number> {
+    // `Number.isInteger` also accepts values beyond a 32-bit column (1e300 is an
+    // "integer"): bound them so an out-of-range id is a no-op everywhere instead of
+    // an adapter-specific error.
+    const clean = ids.filter((n) => Number.isInteger(n) && Math.abs(n) <= INT4_MAX).slice(0, 500);
+    if (clean.length === 0) return Promise.resolve(0);
+    return this.store.rejectedItems.deleteByIds(installationId, clean);
   }
-}
-
-/** Shared WHERE builder for the rejected-item filters (installation/entity/since/reason). */
-function rejectedFilter(f: {
-  installationId?: string;
-  entity?: string;
-  sinceDays?: number;
-  q?: string;
-}): { where: string[]; params: Record<string, unknown> } {
-  const where: string[] = [];
-  const params: Record<string, unknown> = {};
-  if (f.installationId) {
-    where.push('installation_id = @installationId');
-    params.installationId = f.installationId;
-  }
-  if (f.entity) {
-    where.push('entity = @entity');
-    params.entity = f.entity;
-  }
-  if (f.sinceDays) {
-    where.push(`created_at >= datetime('now', @since)`);
-    params.since = `-${f.sinceDays} days`;
-  }
-  if (f.q) {
-    where.push(`reason LIKE @q ESCAPE '\\'`);
-    params.q = `%${likeEscape(f.q)}%`;
-  }
-  return { where, params };
 }
 
 /** Append-only audit trail of admin actions. Metadata ONLY — no secrets, no raw PII. */
 export class AuditRepo {
-  constructor(private readonly db: DatabaseT.Database) {}
+  constructor(
+    private readonly store: IntegrationStore,
+    private readonly clock: StoreClock,
+  ) {}
 
-  add(e: { action: string; installation_id?: string | null; target?: string | null; details?: unknown; ip?: string | null }): void {
+  add(e: { action: string; installation_id?: string | null; target?: string | null; details?: unknown; ip?: string | null }): Promise<void> {
     let details: string | null = null;
     if (e.details !== undefined) {
       try {
@@ -625,34 +426,22 @@ export class AuditRepo {
         details = null;
       }
     }
-    this.db
-      .prepare(
-        `INSERT INTO audit_log (action, installation_id, target, details_json, ip)
-         VALUES (@action, @installation_id, @target, @details_json, @ip)`,
-      )
-      .run({
-        action: e.action,
-        installation_id: nn(e.installation_id),
-        target: nn(e.target),
-        details_json: details,
-        ip: nn(e.ip),
-      });
+    return this.store.audit.add({
+      action: e.action,
+      installation_id: e.installation_id ?? null,
+      target: e.target ?? null,
+      details_json: details,
+      ip: e.ip ?? null,
+    });
   }
 
-  list(f: { limit: number; offset: number }): { items: AuditRow[]; total: number } {
-    const total = (this.db.prepare('SELECT COUNT(*) AS n FROM audit_log').get() as { n: number }).n;
-    const limit = Math.max(1, Math.min(f.limit, 200));
-    const items = this.db
-      .prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?')
-      .all(limit, Math.max(0, f.offset)) as AuditRow[];
-    return { items, total };
+  list(f: { limit: number; offset: number }): Promise<{ items: AuditRow[]; total: number }> {
+    return this.store.audit.list({ limit: clampLimit(f.limit, 200), offset: clampOffset(f.offset) });
   }
 
   /** Retention: deletes audit rows older than `days` days. Returns rows removed. */
-  purgeOlderThan(days: number): number {
-    return this.db
-      .prepare(`DELETE FROM audit_log WHERE at < datetime('now', @cutoff)`)
-      .run({ cutoff: `-${days} days` }).changes;
+  purgeOlderThan(days: number): Promise<number> {
+    return this.store.audit.purgeRecordedBefore(isoDaysAgo(days, this.clock));
   }
 }
 
@@ -668,16 +457,16 @@ export interface Repositories {
   audit: AuditRepo;
 }
 
-export function createRepositories(db: DatabaseT.Database, cipher: SecretCipher): Repositories {
+export function createRepositories(store: IntegrationStore, cipher: SecretCipher, clock: StoreClock = realClock): Repositories {
   return {
-    installs: new InstallRepo(db),
-    webhookLog: new WebhookLogRepo(db),
-    webhookSeen: new WebhookSeenRepo(db),
-    cursors: new CursorRepo(db),
-    runs: new RunRepo(db),
-    state: new IntegrationStateRepo(db, cipher),
-    inboundEvents: new InboundEventRepo(db),
-    rejectedItems: new RejectedItemRepo(db),
-    audit: new AuditRepo(db),
+    installs: new InstallRepo(store),
+    webhookLog: new WebhookLogRepo(store, clock),
+    webhookSeen: new WebhookSeenRepo(store, clock),
+    cursors: new CursorRepo(store),
+    runs: new RunRepo(store, clock),
+    state: new IntegrationStateRepo(store, cipher),
+    inboundEvents: new InboundEventRepo(store, clock),
+    rejectedItems: new RejectedItemRepo(store, clock),
+    audit: new AuditRepo(store, clock),
   };
 }

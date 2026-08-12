@@ -114,7 +114,7 @@ export async function handleWebhook<S>(
   try {
     payload = rawBody ? (JSON.parse(rawBody) as LifecycleRawPayload) : {};
   } catch {
-    deps.repos.webhookLog.log({ event: 'unparseable', signature_ok: sig.ok, payload_json: '[unparseable body omitted]' });
+    await deps.repos.webhookLog.log({ event: 'unparseable', signature_ok: sig.ok, payload_json: '[unparseable body omitted]' });
     return { status: 400, body: { success: false, error: 'invalid_json' } };
   }
 
@@ -123,7 +123,7 @@ export async function handleWebhook<S>(
   // config_schema (e.g. `private_key`, `client_id`, `login`, `pin`...) do not
   // necessarily match the regex and would be written IN CLEAR, bypassing the
   // AES at rest. So first mask the sensitive `configs` per the schema, then redact.
-  deps.repos.webhookLog.log({
+  await deps.repos.webhookLog.log({
     event: payload.event ?? 'unknown',
     installation_id: installIdOf(payload) ?? null,
     signature_ok: sig.ok,
@@ -147,16 +147,16 @@ export async function handleWebhook<S>(
   const installId = installIdOf(payload);
   const dedupKey = headerOf(headers, 'x-shopimind-signature');
   const dedupable = !!(installId && dedupKey);
-  if (dedupable && !deps.repos.webhookSeen.claim(installId as string, dedupKey as string)) {
+  if (dedupable && !(await deps.repos.webhookSeen.claim(installId as string, dedupKey as string))) {
     return { status: 200, body: { success: true } }; // already processed -> harmless replay
   }
 
   try {
     const body = await runHandler(handlerName, payload, deps);
-    if (dedupable && body.success === false) deps.repos.webhookSeen.release(installId as string, dedupKey as string);
+    if (dedupable && body.success === false) await deps.repos.webhookSeen.release(installId as string, dedupKey as string);
     return { status: 200, body };
   } catch (e) {
-    if (dedupable) deps.repos.webhookSeen.release(installId as string, dedupKey as string);
+    if (dedupable) await deps.repos.webhookSeen.release(installId as string, dedupKey as string);
     deps.logger.error('lifecycle handler failed', { event: payload.event, error: errMsg(e) });
     return { status: 200, body: { success: false, error: 'internal_error' } };
   }
@@ -184,44 +184,44 @@ function runHandler<S>(
 async function onInstall<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>): Promise<WebhookResponse> {
   const id = installIdOf(p);
   if (!id) return { success: true };
-  if (p.access_token) deps.repos.state.setSecret(id, ACCESS_TOKEN_KEY, p.access_token);
-  deps.repos.installs.upsert({
+  if (p.access_token) await deps.repos.state.setSecret(id, ACCESS_TOKEN_KEY, p.access_token);
+  await deps.repos.installs.upsert({
     installation_id: id,
     shop_domain: p.shop_domain ?? null,
     shop_name: p.shop_name ?? null,
     status: 'inactive',
     installed_at: p.installed_at ?? null,
   });
-  if (p.configs) saveConfigs(deps.repos.state, id, deps.integration.configSchema, p.configs);
+  if (p.configs) await saveConfigs(deps.repos.state, id, deps.integration.configSchema, p.configs);
   return { success: true };
 }
 
 async function onActivate<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>): Promise<WebhookResponse> {
   const id = installIdOf(p);
   if (!id) return { success: false, error: 'missing_installation_id' };
-  if (p.access_token) deps.repos.state.setSecret(id, ACCESS_TOKEN_KEY, p.access_token);
+  if (p.access_token) await deps.repos.state.setSecret(id, ACCESS_TOKEN_KEY, p.access_token);
   // The install is persisted 'inactive' until activation is validated:
   // the 'active' status is only set AT THE END (testConnection + provisioning OK).
-  deps.repos.installs.upsert({
+  await deps.repos.installs.upsert({
     installation_id: id,
     shop_domain: p.shop_domain ?? null,
     shop_name: p.shop_name ?? null,
     status: 'inactive',
     installed_at: p.installed_at ?? null,
   });
-  if (p.configs) saveConfigs(deps.repos.state, id, deps.integration.configSchema, p.configs);
+  if (p.configs) await saveConfigs(deps.repos.state, id, deps.integration.configSchema, p.configs);
 
-  const ctx = buildContext(id, deps);
+  const ctx = await buildContext(id, deps);
   const ok = await deps.integration.testConnection(ctx).catch(() => false);
   if (!ok) {
-    deps.repos.installs.setStatus(id, 'inactive', {});
+    await deps.repos.installs.setStatus(id, 'inactive', {});
     return { success: false, error: 'connection_failed' };
   }
 
   if (deps.integration.provisioning) {
     const plan = await deps.integration.provisioning(ctx);
     const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
-    deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
+    await deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
     if (prov.errors.length > 0) {
       // Count ALL successful resources (sources, defs, events, statuses) — not
       // just sources/defs: an events-only integration (loyalty/reviews) provisions
@@ -230,15 +230,19 @@ async function onActivate<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>): P
       const provisionedCount =
         Object.keys(prov.sourceIds).length + Object.keys(prov.defIds).length + prov.events + prov.orderStatuses;
       if (provisionedCount === 0) {
-        deps.repos.installs.setStatus(id, 'inactive', {});
+        await deps.repos.installs.setStatus(id, 'inactive', {});
         return { success: false, error: `provisioning_failed: ${prov.errors[0]}` };
       }
       deps.logger.warn('partial provisioning: some resources failed', { installation_id: id, errors: prov.errors });
     }
   }
 
-  if (deps.integration.hooks?.onActivate) await deps.integration.hooks.onActivate(ctx);
-  deps.repos.installs.setStatus(id, 'active', { activated_at: p.activated_at ?? null }); // validated -> active
+  if (deps.integration.hooks?.onActivate) {
+    // Rebuild the context so the hook sees the FRESH provisioning ids persisted above.
+    const hookCtx = await buildContext(id, deps);
+    await deps.integration.hooks.onActivate(hookCtx);
+  }
+  await deps.repos.installs.setStatus(id, 'active', { activated_at: p.activated_at ?? null }); // validated -> active
   deps.afterActivate?.(id);
   return { success: true };
 }
@@ -247,9 +251,9 @@ async function onDeactivate<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>):
   const id = installIdOf(p);
   if (!id) return { success: true };
   // Idempotent transition: already deactivated/uninstalled -> no-op (does not replay the hook).
-  const current = deps.repos.installs.find(id);
+  const current = await deps.repos.installs.find(id);
   if (current && (current.status === 'inactive' || current.status === 'uninstalled')) return { success: true };
-  deps.repos.installs.setStatus(id, 'inactive', { deactivated_at: p.deactivated_at ?? null });
+  await deps.repos.installs.setStatus(id, 'inactive', { deactivated_at: p.deactivated_at ?? null });
   await runHookSafe(deps.integration.hooks?.onDeactivate, id, deps);
   return { success: true };
 }
@@ -258,9 +262,9 @@ async function onUninstall<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>): 
   const id = installIdOf(p);
   if (!id) return { success: true };
   // Idempotent transition: already uninstalled -> no-op (does not replay the hook).
-  const current = deps.repos.installs.find(id);
+  const current = await deps.repos.installs.find(id);
   if (current && current.status === 'uninstalled') return { success: true };
-  deps.repos.installs.setStatus(id, 'uninstalled', { uninstalled_at: p.uninstalled_at ?? null });
+  await deps.repos.installs.setStatus(id, 'uninstalled', { uninstalled_at: p.uninstalled_at ?? null });
   await runHookSafe(deps.integration.hooks?.onUninstall, id, deps);
   return { success: true };
 }
@@ -268,15 +272,19 @@ async function onUninstall<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>): 
 async function onConfigUpdated<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>): Promise<WebhookResponse> {
   const id = installIdOf(p);
   if (!id) return { success: true };
-  if (p.configs) saveConfigs(deps.repos.state, id, deps.integration.configSchema, p.configs);
+  if (p.configs) await saveConfigs(deps.repos.state, id, deps.integration.configSchema, p.configs);
   try {
-    const ctx = buildContext(id, deps);
+    const ctx = await buildContext(id, deps);
     if (deps.integration.provisioning) {
       const plan = await deps.integration.provisioning(ctx);
       const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
-      deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
+      await deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
     }
-    if (deps.integration.hooks?.onConfigUpdated) await deps.integration.hooks.onConfigUpdated(ctx);
+    if (deps.integration.hooks?.onConfigUpdated) {
+      // Rebuild the context so the hook sees the FRESH provisioning ids persisted above.
+      const hookCtx = await buildContext(id, deps);
+      await deps.integration.hooks.onConfigUpdated(hookCtx);
+    }
   } catch (e) {
     // Best-effort: the config is already saved (above) even if reprovisioning
     // failed; the failure is logged but NOT surfaced to ShopiMind. We keep the
@@ -312,10 +320,13 @@ export async function handleRemoteData<S>(
   return { data: options };
 }
 
-function buildContext<S>(id: string, deps: DispatcherDeps<S>): IntegrationContext<S> {
-  const token = deps.repos.state.get(id, ACCESS_TOKEN_KEY);
+async function buildContext<S>(id: string, deps: DispatcherDeps<S>): Promise<IntegrationContext<S>> {
+  const token = await deps.repos.state.get(id, ACCESS_TOKEN_KEY);
   if (!token) throw new Error(`no access_token for installation ${id}`);
-  const configs = loadConfigs(deps.repos.state, id, deps.integration.configSchema);
+  const configs = await loadConfigs(deps.repos.state, id, deps.integration.configSchema);
+  // Pre-load the provisioning blob so `ctx.withSource`/`ctx.customData` stay
+  // synchronous for integrations (the port itself is async).
+  const provisioningRaw = await deps.repos.state.get(id, PROVISIONING_KEY);
   const spm = deps.makeSpmClient(token);
   const logger = deps.logger.child({ installation_id: id });
   const sendBulk = makeSendBulk(spm, logger);
@@ -327,9 +338,9 @@ function buildContext<S>(id: string, deps: DispatcherDeps<S>): IntegrationContex
     state: deps.repos.state,
     logger,
     setExternalAccount: (acc) => deps.repos.installs.setExternalAccount(id, acc.id, acc.name ?? null),
-    inboundSecret: ensureInboundSecret(deps.repos.state, id),
-    withSource: makeWithSource(deps.repos.state, id, PROVISIONING_KEY, sendBulk),
-    customData: makeCustomData(deps.repos.state, id, PROVISIONING_KEY, sendBulk, spm),
+    inboundSecret: await ensureInboundSecret(deps.repos.state, id),
+    withSource: makeWithSource(provisioningRaw, sendBulk),
+    customData: makeCustomData(provisioningRaw, sendBulk, spm),
   };
 }
 
@@ -343,7 +354,7 @@ function ephemeralContext<S>(configs: RawConfigs, deps: DispatcherDeps<S>): Inte
     sendBulk: makeSendBulk(spm, deps.logger),
     state: deps.repos.state,
     logger: deps.logger,
-    setExternalAccount: () => { /* no installation during the config wizard */ },
+    setExternalAccount: async () => { /* no installation during the config wizard */ },
     inboundSecret: '',
     withSource: () => {
       throw new Error('withSource is unavailable during the configuration wizard (no installation)');
@@ -361,7 +372,7 @@ async function runHookSafe<S>(
 ): Promise<void> {
   if (!hook) return;
   try {
-    await hook(buildContext(id, deps));
+    await hook(await buildContext(id, deps));
   } catch (e) {
     deps.logger.warn('lifecycle hook failed', { error: errMsg(e) });
   }

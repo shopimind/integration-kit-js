@@ -31,7 +31,7 @@ export interface Page<T> {
   total: number;
 }
 
-export type StateMeta = ReturnType<Repositories['state']['listMeta']>;
+export type StateMeta = Awaited<ReturnType<Repositories['state']['listMeta']>>;
 
 export interface AdminMeta {
   kitVersion: string;
@@ -74,16 +74,16 @@ export interface RejectedFilter extends PageFilter {
 }
 
 export interface AdminData {
-  meta(): AdminMeta;
-  listInstallations(f: InstallationFilter): Page<InstallRow>;
-  installation(id: string): InstallationDetail | null;
-  cursors(id: string): CursorRow[];
-  runs(id: string, f: PageFilter): Page<SyncRunRow>;
-  webhooks(id: string, f: WebhookFilter): Page<WebhookLogRow>;
-  inbound(id: string, f: PageFilter): Page<InboundEventRow>;
-  state(id: string): StateMeta;
-  rejected(f: RejectedFilter): Page<RejectedItemRow>;
-  audit(f: PageFilter): Page<AuditRow>;
+  meta(): Promise<AdminMeta>;
+  listInstallations(f: InstallationFilter): Promise<Page<InstallRow>>;
+  installation(id: string): Promise<InstallationDetail | null>;
+  cursors(id: string): Promise<CursorRow[]>;
+  runs(id: string, f: PageFilter): Promise<Page<SyncRunRow>>;
+  webhooks(id: string, f: WebhookFilter): Promise<Page<WebhookLogRow>>;
+  inbound(id: string, f: PageFilter): Promise<Page<InboundEventRow>>;
+  state(id: string): Promise<StateMeta>;
+  rejected(f: RejectedFilter): Promise<Page<RejectedItemRow>>;
+  audit(f: PageFilter): Promise<Page<AuditRow>>;
   definition(): IntegrationDescriptor;
 }
 
@@ -101,32 +101,32 @@ export function buildAdminData(
   });
 
   return {
-    meta() {
-      const byStatus = repos.installs.countByStatus();
+    async meta() {
+      const byStatus = await repos.installs.countByStatus();
       const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
       return {
         kitVersion: env.kitVersion,
         generatedAt: new Date(env.now()).toISOString(),
         integration: { name: env.integration.meta.name, slug: env.integration.slug, version: env.integration.meta.version },
         installations: { total, byStatus },
-        webhooks24h: repos.webhookLog.countSince(24),
-        rejected: { total: repos.rejectedItems.count({}), byEntity: repos.rejectedItems.countByEntity() },
+        webhooks24h: await repos.webhookLog.countSince(24),
+        rejected: { total: await repos.rejectedItems.count({}), byEntity: await repos.rejectedItems.countByEntity() },
       };
     },
     listInstallations(f) {
       return repos.installs.list(f);
     },
-    installation(id) {
-      const install = repos.installs.find(id);
+    async installation(id) {
+      const install = await repos.installs.find(id);
       if (!install) return null;
       return {
         install,
-        cursors: repos.cursors.listByInstallation(id),
-        recentRuns: repos.runs.recent(id, 5),
-        lastWebhook: repos.webhookLog.lastForInstallation(id) ?? null,
-        state: repos.state.listMeta(id),
-        rejectedCount: repos.rejectedItems.count({ installationId: id }),
-        seenSignatures7d: repos.webhookSeen.countByInstallationSince(id, 7),
+        cursors: await repos.cursors.listByInstallation(id),
+        recentRuns: await repos.runs.recent(id, 5),
+        lastWebhook: (await repos.webhookLog.lastForInstallation(id)) ?? null,
+        state: await repos.state.listMeta(id),
+        rejectedCount: await repos.rejectedItems.count({ installationId: id }),
+        seenSignatures7d: await repos.webhookSeen.countByInstallationSince(id, 7),
       };
     },
     cursors(id) {
@@ -135,8 +135,8 @@ export function buildAdminData(
     runs(id, f) {
       return repos.runs.list(id, f);
     },
-    webhooks(id, f) {
-      return maskWebhooks(repos.webhookLog.listByInstallation(id, f));
+    async webhooks(id, f) {
+      return maskWebhooks(await repos.webhookLog.listByInstallation(id, f));
     },
     inbound(id, f) {
       return repos.inboundEvents.listByInstallation(id, f);
@@ -144,8 +144,8 @@ export function buildAdminData(
     state(id) {
       return repos.state.listMeta(id);
     },
-    rejected(f) {
-      return maskRejected(repos.rejectedItems.list(f));
+    async rejected(f) {
+      return maskRejected(await repos.rejectedItems.list(f));
     },
     audit(f) {
       return repos.audit.list(f);

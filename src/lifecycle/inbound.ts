@@ -20,11 +20,11 @@ const IDEMPOTENCY_HEADER = 'x-idempotency-key';
 const DUMMY_SECRET = 'insec_unknown_installation_constant_time_guard';
 
 /** Lazily ensures a per-installation inbound secret, encrypted at rest; returns it. */
-export function ensureInboundSecret(state: IntegrationStateRepo, installationId: string): string {
-  const existing = state.get(installationId, INBOUND_SECRET_KEY);
+export async function ensureInboundSecret(state: IntegrationStateRepo, installationId: string): Promise<string> {
+  const existing = await state.get(installationId, INBOUND_SECRET_KEY);
   if (existing) return existing;
   const secret = 'insec_' + randomBytes(24).toString('hex');
-  state.setSecret(installationId, INBOUND_SECRET_KEY, secret);
+  await state.setSecret(installationId, INBOUND_SECRET_KEY, secret);
   return secret;
 }
 
@@ -33,7 +33,7 @@ export interface InboundDeps<S> {
   repos: Repositories;
   logger: Logger;
   /** Builds the context for an installation (decrypted token, `ctx.spm` ready) or null. */
-  buildContext(installationId: string): IntegrationContext<S> | null;
+  buildContext(installationId: string): Promise<IntegrationContext<S> | null>;
   toleranceSeconds?: number;
   /** Returns true if the call is allowed (per-installation rate limit). */
   rateLimit?(installationId: string): boolean;
@@ -80,7 +80,7 @@ export async function handleInbound<S>(
   const installationId = headerValue(headers, INSTALLATION_HEADER);
   if (!installationId) return fail(400, 'missing_installation_header');
 
-  const secret = deps.repos.state.get(installationId, INBOUND_SECRET_KEY);
+  const secret = await deps.repos.state.get(installationId, INBOUND_SECRET_KEY);
   if (!secret) {
     // OPAQUE 401 + still pay the HMAC cost (anti timing/installation-enumeration
     // oracle). The precise reason stays in the server logs, never in the response.
@@ -119,29 +119,29 @@ export async function handleInbound<S>(
   const dedupKey = headerValue(headers, IDEMPOTENCY_HEADER) ?? `sig:${action}:${sigRaw}`;
 
   // Fast path: replay of a call already processed successfully (avoids building the ctx).
-  const prior = deps.repos.inboundEvents.find(installationId, dedupKey);
+  const prior = await deps.repos.inboundEvents.find(installationId, dedupKey);
   if (prior && prior.status === 'done') return ok({ replayed: true });
 
   // Context build BEFORE claiming: if it fails we return 409 'no_context' and
   // claim NOTHING, so a later retry (once the installation is activated) is not
   // wrongly short-circuited as an already-seen replay.
-  const ctx = deps.buildContext(installationId);
+  const ctx = await deps.buildContext(installationId);
   if (!ctx) return fail(409, 'no_context');
 
   // ATOMIC claim before execution (anti-TOCTOU): two concurrent calls cannot
   // execute the handler twice.
-  const claim = deps.repos.inboundEvents.claim(installationId, dedupKey, action);
+  const claim = await deps.repos.inboundEvents.claim(installationId, dedupKey, action);
   if (!claim.fresh && claim.status === 'done') return ok({ replayed: true });
   if (!claim.fresh && claim.status === 'received') return ok({ replayed: true }); // already in progress
   // fresh, or a previous 'failed' attempt -> (re)execute by reusing the claimed row.
 
   try {
     await handler(ctx, payload);
-    deps.repos.inboundEvents.finish(claim.rowId, 'done');
+    await deps.repos.inboundEvents.finish(claim.rowId, 'done');
     return ok();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    deps.repos.inboundEvents.finish(claim.rowId, 'failed', msg);
+    await deps.repos.inboundEvents.finish(claim.rowId, 'failed', msg);
     deps.logger.error('inbound handler failed', { action, error: msg });
     return fail(500, 'internal_error');
   }

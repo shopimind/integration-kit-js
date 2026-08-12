@@ -1,7 +1,7 @@
 {
   "name": "@shopimind/integration-kit-js",
-  "version": "1.6.0",
-  "description": "Foundation for building ShopiMind integrations: a runtime plus typed, once-tested primitives (HMAC webhook signatures, encryption, log redaction, a safe cursor-based sync engine, pagination/concurrency, persistence, ShopiMind SDK re-export, idempotent provisioning, secured inbound middleware, HTTP server). An integration only writes pure functions and declarations passed to defineIntegration.",
+  "version": "2.0.0",
+  "description": "Foundation for building ShopiMind integrations: a runtime plus typed, once-tested primitives (HMAC webhook signatures, encryption, log redaction, a safe cursor-based sync engine, pagination/concurrency, pluggable persistence with official SQLite and PostgreSQL stores, ShopiMind SDK re-export, idempotent provisioning, secured inbound middleware, HTTP server). An integration only writes pure functions and declarations passed to defineIntegration.",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
@@ -17,6 +17,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./store-sqlite": {
+      "types": "./dist/store/sqlite/index.d.ts",
+      "import": "./dist/store/sqlite/index.js"
+    },
+    "./store-postgres": {
+      "types": "./dist/store/postgres/index.d.ts",
+      "import": "./dist/store/postgres/index.js"
+    },
+    "./store-testing": {
+      "types": "./dist/testing/store-conformance.d.ts",
+      "import": "./dist/testing/store-conformance.js"
     }
   },
   "files": [
@@ -42,12 +54,26 @@
   },
   "dependencies": {
     "@hapi/hapi": "^21.3.10",
-    "@shopimind/sdk-js": "^1.0.0",
-    "better-sqlite3": "^11.3.0"
+    "@shopimind/sdk-js": "^1.0.0"
+  },
+  "peerDependencies": {
+    "better-sqlite3": "^11.3.0",
+    "pg": "^8.12.0"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^18.19.0",
+    "@types/pg": "^8.11.6",
+    "better-sqlite3": "^11.3.0",
+    "pg": "^8.12.0",
     "typescript": "^5.6.2",
     "vitest": "^2.1.0"
   }

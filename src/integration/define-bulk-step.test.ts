@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { openDatabase } from '../store/db.js';
+import { createSqliteStore } from '../store/sqlite/index.js';
 import { createRepositories } from '../store/repositories.js';
 import { SecretCipher } from '../security/crypto.js';
 import { createLogger } from '../logging/logger.js';
@@ -7,15 +7,20 @@ import { runIntegrationSync } from '../sync/engine.js';
 import { makeWithSource } from '../sdk/source-scope.js';
 import { makeCustomData } from '../sdk/custom-data-scope.js';
 import { makeSendBulk, type SendBulk } from '../sdk/send-bulk.js';
-import { PROVISIONING_KEY } from '../lifecycle/dispatcher.js';
 import { defineBulkStep } from './define-bulk-step.js';
 import type { IntegrationContext } from './types.js';
 
 const cipher = new SecretCipher({ key: 'd'.repeat(64) });
 const at = new Date('2026-06-21T00:00:00.000Z');
 
-function setup() {
-  const repos = createRepositories(openDatabase(':memory:'), cipher);
+const makeStore = async () => {
+  const s = await createSqliteStore({ path: ':memory:' });
+  await s.migrate();
+  return s;
+};
+
+async function setup() {
+  const repos = createRepositories(await makeStore(), cipher);
   const logger = createLogger({ sink: () => {} });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const spm = {} as any;
@@ -26,7 +31,7 @@ function setup() {
     sendBulk: makeSendBulk(spm, logger),
     state: repos.state,
     logger,
-    setExternalAccount: () => {},
+    setExternalAccount: async () => {},
     inboundSecret: '',
     withSource: () => { throw new Error('n/a'); },
     customData: () => { throw new Error('n/a'); },
@@ -34,8 +39,9 @@ function setup() {
   const deps = {
     cursors: repos.cursors,
     runs: repos.runs,
-    makeSource: (sb: SendBulk) => makeWithSource(repos.state, 'inst', PROVISIONING_KEY, sb),
-    makeCustomData: (sb: SendBulk) => makeCustomData(repos.state, 'inst', PROVISIONING_KEY, sb, spm),
+    // No provisioning blob here: no step in these tests resolves a source/definition.
+    makeSource: (sb: SendBulk) => makeWithSource(null, sb),
+    makeCustomData: (sb: SendBulk) => makeCustomData(null, sb, spm),
     rejectedItems: repos.rejectedItems,
   };
   return { repos, base, deps };
@@ -47,7 +53,7 @@ const okPush = (_c: any, items: any[]) =>
 
 describe('defineBulkStep', () => {
   it('batches/flushes, counts items, and advances the cursor to window.until by default', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const pushed: number[] = [];
     const step = defineBulkStep<Record<string, never>, number, { id: number }>({
       entity: 'products',
@@ -66,11 +72,11 @@ describe('defineBulkStep', () => {
     expect(sum.status).toBe('ok');
     expect(sum.steps[0]?.items).toBe(3);
     expect(pushed).toEqual([2, 1]); // batches of 2 then the remaining 1
-    expect(repos.cursors.get('inst', 'products', '')?.last_synced_at).toBe(at.toISOString());
+    expect((await repos.cursors.get('inst', 'products', ''))?.last_synced_at).toBe(at.toISOString());
   });
 
   it('skips items when map returns null', async () => {
-    const { base, deps } = setup();
+    const { base, deps } = await setup();
     const step = defineBulkStep<Record<string, never>, number, { id: number }>({
       entity: 'products',
       stream: async function* () { yield 1; yield 2; yield 3; },
@@ -83,7 +89,7 @@ describe('defineBulkStep', () => {
   });
 
   it('collects a stream/push error and HOLDS the cursor (no advance)', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const step = defineBulkStep<Record<string, never>, number, { id: number }>({
       entity: 'products',
       stream: async function* () { yield 1; throw new Error('stream boom'); },
@@ -94,7 +100,7 @@ describe('defineBulkStep', () => {
     const sum = await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
     expect(sum.status).toBe('partial');
     expect(sum.errors[0]).toContain('stream boom');
-    expect(repos.cursors.get('inst', 'products', '')?.last_synced_at).toBeNull();
+    expect((await repos.cursors.get('inst', 'products', ''))?.last_synced_at).toBeNull();
   });
 
   it('defaults enabled to true and cursorScope to global', () => {

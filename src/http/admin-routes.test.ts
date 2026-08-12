@@ -31,7 +31,7 @@ describe('admin read endpoints — auth', () => {
     '/admin/audit',
   ];
   it('returns 401 without the admin token', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
     for (const url of paths) {
       const res = await app.server.inject({ method: 'GET', url });
       expect(res.statusCode, url).toBe(401);
@@ -42,8 +42,8 @@ describe('admin read endpoints — auth', () => {
 
 describe('GET /admin/meta', () => {
   it('returns the dashboard synthesis with the token', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
     const res = await app.server.inject({ method: 'GET', url: '/admin/meta', headers: auth });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.payload);
@@ -57,7 +57,7 @@ describe('GET /admin/meta', () => {
 
 describe('GET /admin/definition', () => {
   it('401 without token; returns the integration definition with the token', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
     expect((await app.server.inject({ method: 'GET', url: '/admin/definition' })).statusCode).toBe(401);
     const res = await app.server.inject({ method: 'GET', url: '/admin/definition', headers: auth });
     expect(res.statusCode).toBe(200);
@@ -72,8 +72,8 @@ describe('GET /admin/definition', () => {
 
 describe('GET /admin/installations + detail', () => {
   it('lists installations and returns an aggregate detail', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', shop_name: 'Alpha', status: 'active' });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', shop_name: 'Alpha', status: 'active' });
 
     const list = await app.server.inject({ method: 'GET', url: '/admin/installations', headers: auth });
     expect(list.statusCode).toBe(200);
@@ -86,7 +86,7 @@ describe('GET /admin/installations + detail', () => {
   });
 
   it('returns 404 for an unknown installation', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
     const res = await app.server.inject({ method: 'GET', url: '/admin/installations/ghost', headers: auth });
     expect(res.statusCode).toBe(404);
     await app.stop();
@@ -95,10 +95,10 @@ describe('GET /admin/installations + detail', () => {
 
 describe('GET /admin/installations/{id}/state — SECURITY', () => {
   it('exposes state metadata but NEVER a secret value', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
-    app.repos.state.set('a', 'pref', 'fr');
-    app.repos.state.setSecret('a', 'api_key', 'S3CR3T-do-not-leak');
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
+    await app.repos.state.set('a', 'pref', 'fr');
+    await app.repos.state.setSecret('a', 'api_key', 'S3CR3T-do-not-leak');
 
     const res = await app.server.inject({ method: 'GET', url: '/admin/installations/a/state', headers: auth });
     expect(res.statusCode).toBe(200);
@@ -114,9 +114,9 @@ describe('GET /admin/installations/{id}/state — SECURITY', () => {
 
 describe('GET /admin/installations/{id}/webhooks — PII masking', () => {
   it('masks emails/phones in the returned payloads', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
-    app.repos.webhookLog.log({
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
+    await app.repos.webhookLog.log({
       event: 'installed',
       installation_id: 'a',
       signature_ok: true,
@@ -132,8 +132,8 @@ describe('GET /admin/installations/{id}/webhooks — PII masking', () => {
 
 describe('GET /admin/rejected — global dead-letter (masked)', () => {
   it('lists rejected items across installations with PII masked', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.rejectedItems.add({ installation_id: 'a', entity: 'customers', payload_json: '{"email":"x@y.io"}' });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.rejectedItems.add({ installation_id: 'a', entity: 'customers', payload_json: '{"email":"x@y.io"}' });
     const res = await app.server.inject({ method: 'GET', url: '/admin/rejected', headers: auth });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.payload);
@@ -150,7 +150,7 @@ const sidFromSetCookie = (setCookie: string[] | undefined): string => {
 
 describe('GET /admin/ui — UI shell', () => {
   it('serves HTML with a per-request nonce CSP and no leftover placeholder', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
     const res = await app.server.inject({ method: 'GET', url: '/admin/ui' });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('text/html');
@@ -164,7 +164,7 @@ describe('GET /admin/ui — UI shell', () => {
 
 describe('admin session flow (token -> cookie -> read -> logout)', () => {
   it('rejects a wrong token and issues a hardened cookie for the right one', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
     const bad = await app.server.inject({ method: 'POST', url: '/admin/session', payload: JSON.stringify({ token: 'nope' }) });
     expect(bad.statusCode).toBe(401);
 
@@ -178,8 +178,8 @@ describe('admin session flow (token -> cookie -> read -> logout)', () => {
   });
 
   it('a session cookie authorizes reads WITHOUT the raw token, and logout revokes it', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
 
     const login = await app.server.inject({ method: 'POST', url: '/admin/session', payload: JSON.stringify({ token: TOKEN }) });
     const sid = sidFromSetCookie(login.headers['set-cookie'] as string[] | undefined);
@@ -199,7 +199,7 @@ describe('admin session flow (token -> cookie -> read -> logout)', () => {
   });
 
   it('admin login is per-IP rate-limited (bounds token brute-forcing)', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
     let saw429 = false;
     for (let i = 0; i < 15; i++) {
       const res = await app.server.inject({ method: 'POST', url: '/admin/session', payload: JSON.stringify({ token: 'wrong' }) });
@@ -213,7 +213,7 @@ describe('admin session flow (token -> cookie -> read -> logout)', () => {
   });
 });
 
-const login = async (app: ReturnType<typeof makeTestApp>): Promise<{ cookie: string; csrf: string }> => {
+const login = async (app: Awaited<ReturnType<typeof makeTestApp>>): Promise<{ cookie: string; csrf: string }> => {
   const res = await app.server.inject({ method: 'POST', url: '/admin/session', payload: JSON.stringify({ token: TOKEN }) });
   const sid = sidFromSetCookie(res.headers['set-cookie'] as string[] | undefined);
   return { cookie: `spm_admin_sid=${sid}`, csrf: JSON.parse(res.payload).csrf };
@@ -221,8 +221,8 @@ const login = async (app: ReturnType<typeof makeTestApp>): Promise<{ cookie: str
 
 describe('admin mutations — auth, CSRF, audit, scoping', () => {
   it('POST /admin/sync: 401 unauth, 200 via token (no CSRF), and writes an audit entry', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
     expect((await app.server.inject({ method: 'POST', url: '/admin/sync/a' })).statusCode).toBe(401);
     const ok = await app.server.inject({ method: 'POST', url: '/admin/sync/a', headers: auth });
     expect(ok.statusCode).toBe(200);
@@ -233,8 +233,8 @@ describe('admin mutations — auth, CSRF, audit, scoping', () => {
   });
 
   it('session mutations require a matching CSRF token (403 without, 200 with)', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
     const { cookie, csrf } = await login(app);
     const noCsrf = await app.server.inject({ method: 'POST', url: '/admin/sync/a', headers: { cookie } });
     expect(noCsrf.statusCode).toBe(403);
@@ -244,9 +244,9 @@ describe('admin mutations — auth, CSRF, audit, scoping', () => {
   });
 
   it('reveals a rejected item RAW payload (audited), 404 for unknown id', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.rejectedItems.add({ installation_id: 'a', entity: 'customers', payload_json: '{"email":"real@x.io"}' });
-    const id = app.repos.rejectedItems.list({ installationId: 'a', limit: 1, offset: 0 }).items[0]!.id;
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.rejectedItems.add({ installation_id: 'a', entity: 'customers', payload_json: '{"email":"real@x.io"}' });
+    const id = (await app.repos.rejectedItems.list({ installationId: 'a', limit: 1, offset: 0 })).items[0]!.id;
     const res = await app.server.inject({ method: 'POST', url: `/admin/rejected/${id}/reveal`, headers: auth });
     expect(res.statusCode).toBe(200);
     expect(res.payload).toContain('real@x.io'); // raw + audited
@@ -258,19 +258,19 @@ describe('admin mutations — auth, CSRF, audit, scoping', () => {
   });
 
   it('webhook reveal is SCOPED to the installation (404 on mismatch)', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.webhookLog.log({ event: 'installed', installation_id: 'a', signature_ok: true, payload_json: '{"y":9}' });
-    const logId = app.repos.webhookLog.listByInstallation('a', { limit: 1, offset: 0 }).items[0]!.id;
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.webhookLog.log({ event: 'installed', installation_id: 'a', signature_ok: true, payload_json: '{"y":9}' });
+    const logId = (await app.repos.webhookLog.listByInstallation('a', { limit: 1, offset: 0 })).items[0]!.id;
     expect((await app.server.inject({ method: 'POST', url: `/admin/installations/a/webhook-log/${logId}/reveal`, headers: auth })).statusCode).toBe(200);
     expect((await app.server.inject({ method: 'POST', url: `/admin/installations/b/webhook-log/${logId}/reveal`, headers: auth })).statusCode).toBe(404);
     await app.stop();
   });
 
   it('purge deletes ONLY within the named installation', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.rejectedItems.add({ installation_id: 'a', entity: 'orders', payload_json: '{}' });
-    app.repos.rejectedItems.add({ installation_id: 'b', entity: 'orders', payload_json: '{}' });
-    const bId = app.repos.rejectedItems.list({ installationId: 'b', limit: 1, offset: 0 }).items[0]!.id;
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.rejectedItems.add({ installation_id: 'a', entity: 'orders', payload_json: '{}' });
+    await app.repos.rejectedItems.add({ installation_id: 'b', entity: 'orders', payload_json: '{}' });
+    const bId = (await app.repos.rejectedItems.list({ installationId: 'b', limit: 1, offset: 0 })).items[0]!.id;
     const res = await app.server.inject({
       method: 'POST',
       url: '/admin/rejected/purge',
@@ -279,17 +279,17 @@ describe('admin mutations — auth, CSRF, audit, scoping', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.payload).removed).toBe(0); // cross-tenant no-op
-    expect(app.repos.rejectedItems.count({ installationId: 'b' })).toBe(1);
+    expect(await app.repos.rejectedItems.count({ installationId: 'b' })).toBe(1);
     await app.stop();
   });
 });
 
 describe('admin — audited actions & masking end-to-end', () => {
   it('state over HTTP: large secret preview is NULL, large plaintext truncated to 200', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
-    app.repos.state.set('a', 'big', 'z'.repeat(400));
-    app.repos.state.setSecret('a', 'api_key', 'S'.repeat(400));
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
+    await app.repos.state.set('a', 'big', 'z'.repeat(400));
+    await app.repos.state.setSecret('a', 'api_key', 'S'.repeat(400));
     const res = await app.server.inject({ method: 'GET', url: '/admin/installations/a/state', headers: auth });
     expect(res.statusCode).toBe(200);
     const items = JSON.parse(res.payload).items as Array<{ key: string; value_preview: string | null }>;
@@ -299,10 +299,10 @@ describe('admin — audited actions & masking end-to-end', () => {
   });
 
   it('webhook reveal returns RAW payload and is audited; the list stays masked', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
-    app.repos.webhookLog.log({ event: 'installed', installation_id: 'a', signature_ok: true, payload_json: '{"email":"real@corp.io"}' });
-    const logId = app.repos.webhookLog.listByInstallation('a', { limit: 1, offset: 0 }).items[0]!.id;
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
+    await app.repos.webhookLog.log({ event: 'installed', installation_id: 'a', signature_ok: true, payload_json: '{"email":"real@corp.io"}' });
+    const logId = (await app.repos.webhookLog.listByInstallation('a', { limit: 1, offset: 0 })).items[0]!.id;
     const masked = await app.server.inject({ method: 'GET', url: '/admin/installations/a/webhooks', headers: auth });
     expect(masked.payload).not.toContain('real@corp.io');
     const revealed = await app.server.inject({ method: 'POST', url: `/admin/installations/a/webhook-log/${logId}/reveal`, headers: auth });
@@ -314,9 +314,9 @@ describe('admin — audited actions & masking end-to-end', () => {
   });
 
   it('purge is audited with {requested, removed}', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.rejectedItems.add({ installation_id: 'a', entity: 'orders', payload_json: '{}' });
-    const id = app.repos.rejectedItems.list({ installationId: 'a', limit: 1, offset: 0 }).items[0]!.id;
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.rejectedItems.add({ installation_id: 'a', entity: 'orders', payload_json: '{}' });
+    const id = (await app.repos.rejectedItems.list({ installationId: 'a', limit: 1, offset: 0 })).items[0]!.id;
     const purge = await app.server.inject({ method: 'POST', url: '/admin/rejected/purge', headers: auth, payload: JSON.stringify({ installationId: 'a', ids: [id] }) });
     expect(JSON.parse(purge.payload).removed).toBe(1);
     const audit = await app.server.inject({ method: 'GET', url: '/admin/audit', headers: auth });
@@ -326,9 +326,9 @@ describe('admin — audited actions & masking end-to-end', () => {
   });
 
   it('reprovision returns an outcome and is audited', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
-    app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
-    app.repos.state.setSecret('a', '__access_token', 'int_T'); // buildContext needs a token
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
+    await app.repos.installs.upsert({ installation_id: 'a', status: 'active' });
+    await app.repos.state.setSecret('a', '__access_token', 'int_T'); // buildContext needs a token
     const res = await app.server.inject({ method: 'POST', url: '/admin/installations/a/reprovision', headers: auth });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.payload).outcome).toHaveProperty('sources');
@@ -338,7 +338,7 @@ describe('admin — audited actions & masking end-to-end', () => {
   });
 
   it('login and login.failed are recorded in the audit trail', async () => {
-    const app = makeTestApp(integration, { adminToken: TOKEN });
+    const app = await makeTestApp(integration, { adminToken: TOKEN });
     await app.server.inject({ method: 'POST', url: '/admin/session', payload: JSON.stringify({ token: 'wrong' }) });
     await app.server.inject({ method: 'POST', url: '/admin/session', payload: JSON.stringify({ token: TOKEN }) });
     const audit = await app.server.inject({ method: 'GET', url: '/admin/audit', headers: auth });

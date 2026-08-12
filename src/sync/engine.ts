@@ -13,6 +13,7 @@ import { makeSendBulk, type SendBulk } from '../sdk/send-bulk.js';
 import { paginate } from './paginate.js';
 import { mapWithConcurrency } from './concurrency.js';
 import { shouldAdvanceCursor } from './cursor.js';
+import { parseStoreTimestamp } from '../store/time.js';
 
 export interface SyncOptions {
   fullBackfill?: boolean;
@@ -137,7 +138,7 @@ export async function runIntegrationSync<S>(
   const full = opts.fullBackfill ?? false;
   const overlapSeconds = opts.overlapSeconds ?? 0;
 
-  const runId = deps.runs.start(base.installationId);
+  const runId = await deps.runs.start(base.installationId);
   const summary: SyncSummary = { runId, status: 'ok', mode: full ? 'full' : 'incremental', steps: [], errors: [] };
   // Per-run budget shared across all step-sources: caps total dead-lettered items.
   const deadLetterBudget = { remaining: REJECTED_ITEMS_CAP_PER_RUN };
@@ -166,10 +167,10 @@ export async function runIntegrationSync<S>(
       }
     }
     summary.status = summary.errors.length > 0 ? 'partial' : 'ok';
-    deps.runs.finish(runId, summary.status, summary);
+    await deps.runs.finish(runId, summary.status, summary);
     return summary;
   } catch (e) {
-    deps.runs.finish(runId, 'failed', { errors: [errMsg(e)] });
+    await deps.runs.finish(runId, 'failed', { errors: [errMsg(e)] });
     throw e;
   }
 }
@@ -202,7 +203,7 @@ async function runOneSource<S>(
     deadLetterBudget: { remaining: number };
   },
 ): Promise<SyncStepSummary> {
-  const cursor = deps.cursors.get(base.installationId, step.entity, sourceKey) ?? null;
+  const cursor = (await deps.cursors.get(base.installationId, step.entity, sourceKey)) ?? null;
 
   // EXPONENTIAL BACKOFF. A cursor that keeps failing must not hammer a broken
   // upstream every tick. While inside the backoff window (based on the last failure's
@@ -212,7 +213,8 @@ async function runOneSource<S>(
   const failures = cursor?.consecutive_failures ?? 0;
   if (!win.full && failures > 0 && cursor?.updated_at) {
     const backoffMs = backoffWindowMs(failures);
-    const lastAt = Date.parse(cursor.updated_at + 'Z'); // stored UTC (SQLite datetime('now'))
+    // Stored UTC; tolerates both the canonical ISO `Z` format and legacy v1 rows.
+    const lastAt = parseStoreTimestamp(cursor.updated_at);
     const readyAt = Number.isNaN(lastAt) ? 0 : lastAt + backoffMs;
     if (win.now().getTime() < readyAt) {
       base.logger.info(`sync step '${step.entity}' in backoff — skipped this tick`, {
@@ -236,7 +238,7 @@ async function runOneSource<S>(
     // DEAD-LETTER. Persist what the API refused (bounded by the per-run budget)
     // so it survives the run for inspection/replay. Best-effort: a store hiccup here
     // must never fail the sync.
-    if (deps.rejectedItems) recordRejects(deps.rejectedItems, base, step, sourceKey, win, items, rejects.count);
+    if (deps.rejectedItems) void recordRejects(deps.rejectedItems, base, step, sourceKey, win, items, rejects.count);
   });
 
   const ctx: SyncStepContext<S> = {
@@ -291,7 +293,7 @@ async function runOneSource<S>(
     // Never advance past the window upper bound: a future cursor would make the
     // next window empty/inverted and silently skip data.
     const clamped = advanceTo.getTime() > window.until.getTime() ? window.until : advanceTo;
-    deps.cursors.set(base.installationId, step.entity, sourceKey, {
+    await deps.cursors.set(base.installationId, step.entity, sourceKey, {
       last_synced_at: clamped.toISOString(),
       last_status: 'ok',
       items: result.items,
@@ -313,7 +315,7 @@ async function runOneSource<S>(
         last_error: errors.join('; '),
       });
     }
-    deps.cursors.set(base.installationId, step.entity, sourceKey, {
+    await deps.cursors.set(base.installationId, step.entity, sourceKey, {
       last_synced_at: cursor?.last_synced_at ?? null,
       last_status: 'error',
       last_error: errors.join('; '),
@@ -330,7 +332,7 @@ async function runOneSource<S>(
  * budget. Best-effort: any store error is swallowed (a broken dead-letter must never
  * fail sync) — the rejection is already surfaced via the warn log + cursor hold.
  */
-function recordRejects<S>(
+async function recordRejects<S>(
   repo: RejectedItemRepo,
   base: IntegrationContext<S>,
   step: SyncStep<S>,
@@ -338,13 +340,14 @@ function recordRejects<S>(
   win: { runId: number; deadLetterBudget: { remaining: number } },
   items: unknown[],
   reasonCount: number,
-): void {
+): Promise<void> {
   if (win.deadLetterBudget.remaining <= 0) return;
   try {
     for (const item of items) {
       if (win.deadLetterBudget.remaining <= 0) break;
+      // Decrement BEFORE the await so concurrent reject batches cannot overshoot the cap.
       win.deadLetterBudget.remaining -= 1;
-      repo.add({
+      await repo.add({
         installation_id: base.installationId,
         run_id: win.runId,
         entity: step.entity,

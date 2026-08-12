@@ -50,10 +50,14 @@ export interface IntegrationContext<S> {
    *   `ctx.sendBulk(SpmCustomDataRecords.bulkSave, records)`
    */
   sendBulk: SendBulk;
+  /**
+   * Encrypted per-installation KV (the kit's state facade). All methods are
+   * async since kit v2 (the persistence port supports network backends).
+   */
   state: IntegrationStateRepo;
   logger: Logger;
   /** Records the INTEGRATOR account tied to this installation (correlation bridge). */
-  setExternalAccount(account: { id: string; name?: string | null }): void;
+  setExternalAccount(account: { id: string; name?: string | null }): Promise<void>;
   /**
    * PER-INSTALLATION HMAC secret for inbound routes (middleware). Pass it to the
    * integrator's app (typically in `onActivate`) so it can sign its inbound calls.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { openDatabase } from '../store/db.js';
+import { createSqliteStore } from '../store/sqlite/index.js';
 import { createRepositories } from '../store/repositories.js';
 import { SecretCipher } from '../security/crypto.js';
 import { createLogger, type LogLine } from '../logging/logger.js';
@@ -7,14 +7,19 @@ import { runIntegrationSync, computeWindow, backoffWindowMs, rejectsTolerated } 
 import { makeWithSource } from '../sdk/source-scope.js';
 import { makeCustomData } from '../sdk/custom-data-scope.js';
 import { makeSendBulk, type SendBulk } from '../sdk/send-bulk.js';
-import { PROVISIONING_KEY } from '../lifecycle/dispatcher.js';
 import type { IntegrationContext, SyncStep } from '../integration/types.js';
 
 const cipher = new SecretCipher({ key: 'c'.repeat(64) });
 const at = new Date('2026-06-21T00:00:00.000Z');
 
-function setup(sink: (line: LogLine) => void = () => {}) {
-  const repos = createRepositories(openDatabase(':memory:'), cipher);
+const makeStore = async () => {
+  const s = await createSqliteStore({ path: ':memory:' });
+  await s.migrate();
+  return s;
+};
+
+async function setup(sink: (line: LogLine) => void = () => {}) {
+  const repos = createRepositories(await makeStore(), cipher);
   const logger = createLogger({ sink });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const spm = {} as any;
@@ -25,7 +30,7 @@ function setup(sink: (line: LogLine) => void = () => {}) {
     sendBulk: makeSendBulk(spm, logger),
     state: repos.state,
     logger,
-    setExternalAccount: () => {},
+    setExternalAccount: async () => {},
     inboundSecret: '',
     withSource: () => {
       throw new Error('n/a');
@@ -37,8 +42,9 @@ function setup(sink: (line: LogLine) => void = () => {}) {
   const deps = {
     cursors: repos.cursors,
     runs: repos.runs,
-    makeSource: (sb: SendBulk) => makeWithSource(repos.state, 'inst', PROVISIONING_KEY, sb),
-    makeCustomData: (sb: SendBulk) => makeCustomData(repos.state, 'inst', PROVISIONING_KEY, sb, spm),
+    // No provisioning blob here: no step in these tests resolves a source/definition.
+    makeSource: (sb: SendBulk) => makeWithSource(null, sb),
+    makeCustomData: (sb: SendBulk) => makeCustomData(null, sb, spm),
     rejectedItems: repos.rejectedItems,
   };
   return { repos, base, deps };
@@ -46,7 +52,7 @@ function setup(sink: (line: LogLine) => void = () => {}) {
 
 describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
   it('advances the cursor on a clean run', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const step: SyncStep<Record<string, never>> = {
       entity: 'customers',
       cursorScope: 'global',
@@ -55,12 +61,12 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     };
     const sum = await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
     expect(sum.status).toBe('ok');
-    expect(repos.cursors.get('inst', 'customers', '')?.last_synced_at).toBe(at.toISOString());
+    expect((await repos.cursors.get('inst', 'customers', ''))?.last_synced_at).toBe(at.toISOString());
   });
 
   it('DOES NOT advance the cursor on a partial run', async () => {
-    const { repos, base, deps } = setup();
-    repos.cursors.set('inst', 'orders', '', { last_synced_at: '2026-06-01T00:00:00.000Z' });
+    const { repos, base, deps } = await setup();
+    await repos.cursors.set('inst', 'orders', '', { last_synced_at: '2026-06-01T00:00:00.000Z' });
     const step: SyncStep<Record<string, never>> = {
       entity: 'orders',
       cursorScope: 'global',
@@ -69,11 +75,11 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     };
     const sum = await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
     expect(sum.status).toBe('partial');
-    expect(repos.cursors.get('inst', 'orders', '')?.last_synced_at).toBe('2026-06-01T00:00:00.000Z');
+    expect((await repos.cursors.get('inst', 'orders', ''))?.last_synced_at).toBe('2026-06-01T00:00:00.000Z');
   });
 
   it('isolates per-source cursors: a failing store does not block the others', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const step: SyncStep<Record<string, never>> = {
       entity: 'orders',
       cursorScope: 'per-source',
@@ -86,16 +92,16 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     };
     const sum = await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
     expect(sum.status).toBe('partial');
-    expect(repos.cursors.get('inst', 'orders', '101')?.last_synced_at).toBe(at.toISOString());
+    expect((await repos.cursors.get('inst', 'orders', '101'))?.last_synced_at).toBe(at.toISOString());
     // 102 failed: a failure row is recorded but the cursor is NOT advanced.
-    const failed = repos.cursors.get('inst', 'orders', '102');
+    const failed = await repos.cursors.get('inst', 'orders', '102');
     expect(failed?.last_status).toBe('error');
     expect(failed?.last_synced_at).toBeNull();
   });
 
   it('writes a failure cursor row WITHOUT advancing last_synced_at', async () => {
-    const { repos, base, deps } = setup();
-    repos.cursors.set('inst', 'orders', '', { last_synced_at: '2026-06-01T00:00:00.000Z', last_status: 'ok' });
+    const { repos, base, deps } = await setup();
+    await repos.cursors.set('inst', 'orders', '', { last_synced_at: '2026-06-01T00:00:00.000Z', last_status: 'ok' });
     const step: SyncStep<Record<string, never>> = {
       entity: 'orders',
       cursorScope: 'global',
@@ -104,7 +110,7 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     };
     const sum = await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
     expect(sum.status).toBe('partial');
-    const row = repos.cursors.get('inst', 'orders', '');
+    const row = await repos.cursors.get('inst', 'orders', '');
     // The old cursor value is preserved (window replayed next run).
     expect(row?.last_synced_at).toBe('2026-06-01T00:00:00.000Z');
     expect(row?.last_status).toBe('error');
@@ -112,7 +118,7 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
   });
 
   it('writes a failure cursor row with a null last_synced_at on a never-synced source', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const step: SyncStep<Record<string, never>> = {
       entity: 'orders',
       cursorScope: 'global',
@@ -121,7 +127,7 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     };
     const sum = await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
     expect(sum.status).toBe('partial');
-    const row = repos.cursors.get('inst', 'orders', '');
+    const row = await repos.cursors.get('inst', 'orders', '');
     expect(row).toBeDefined();
     expect(row?.last_synced_at).toBeNull();
     expect(row?.last_status).toBe('error');
@@ -129,7 +135,7 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
   });
 
   it('surfaces an explicit error for a per-source step without sources()', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     let ran = false;
     const step: SyncStep<Record<string, never>> = {
       entity: 'orders',
@@ -148,7 +154,7 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
   });
 
   it('skips disabled steps', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     let ran = false;
     const step: SyncStep<Record<string, never>> = {
       entity: 'products',
@@ -164,7 +170,7 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
   });
 
   it('captures a step exception as an error (partial run, no crash)', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const step: SyncStep<Record<string, never>> = {
       entity: 'loyalty',
       cursorScope: 'global',
@@ -177,13 +183,13 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     expect(sum.status).toBe('partial');
     expect(sum.errors[0]).toContain('boom');
     // The thrown step records a failure row (not advanced) for observability.
-    const row = repos.cursors.get('inst', 'loyalty', '');
+    const row = await repos.cursors.get('inst', 'loyalty', '');
     expect(row?.last_status).toBe('error');
     expect(row?.last_error).toContain('boom');
   });
 
   it('HOLDS the cursor when a push reports rejections (no silent data loss)', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const step: SyncStep<Record<string, never>> = {
       entity: 'products',
       cursorScope: 'global',
@@ -208,13 +214,13 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     // Even though the step returned no error, the rejection holds the cursor.
     expect(sum.status).toBe('partial');
     expect(sum.steps[0]?.rejected).toBe(1);
-    const row = repos.cursors.get('inst', 'products', '');
+    const row = await repos.cursors.get('inst', 'products', '');
     expect(row?.last_status).toBe('error');
     expect(row?.last_synced_at).toBeNull();
   });
 
   it('tolerateRejects advances the cursor despite rejections (still surfaced)', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const step: SyncStep<Record<string, never>> = {
       entity: 'products',
       cursorScope: 'global',
@@ -239,11 +245,11 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     // Poison-pill escape hatch: the cursor advances, but the rejection is still counted.
     expect(sum.status).toBe('ok');
     expect(sum.steps[0]?.rejected).toBe(1);
-    expect(repos.cursors.get('inst', 'products', '')?.last_synced_at).toBe(at.toISOString());
+    expect((await repos.cursors.get('inst', 'products', ''))?.last_synced_at).toBe(at.toISOString());
   });
 
   it('tolerateRejects does NOT tolerate transport failures (failed -> cursor held)', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const step: SyncStep<Record<string, never>> = {
       entity: 'products',
       cursorScope: 'global',
@@ -267,14 +273,14 @@ describe('runIntegrationSync - safe cursor (prevents data loss)', () => {
     const sum = await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
     // The push throws (transport) -> step error -> cursor NOT advanced despite tolerateRejects.
     expect(sum.status).toBe('partial');
-    expect(repos.cursors.get('inst', 'products', '')?.last_synced_at).toBeNull();
+    expect((await repos.cursors.get('inst', 'products', ''))?.last_synced_at).toBeNull();
   });
 });
 
 describe('runIntegrationSync - E2 "silent step" warning', () => {
   it('warns when a clean step returns no advanceCursorTo (forgotten advance)', async () => {
     const lines: LogLine[] = [];
-    const { base, deps } = setup((l) => lines.push(l));
+    const { base, deps } = await setup((l) => lines.push(l));
     const step: SyncStep<Record<string, never>> = {
       entity: 'customers',
       cursorScope: 'global',
@@ -290,7 +296,7 @@ describe('runIntegrationSync - E2 "silent step" warning', () => {
 
   it('does NOT warn when a clean step advances the cursor', async () => {
     const lines: LogLine[] = [];
-    const { base, deps } = setup((l) => lines.push(l));
+    const { base, deps } = await setup((l) => lines.push(l));
     const step: SyncStep<Record<string, never>> = {
       entity: 'customers',
       cursorScope: 'global',
@@ -303,7 +309,7 @@ describe('runIntegrationSync - E2 "silent step" warning', () => {
 
   it('does NOT warn when a step reports an error (the error, not the missing advance, is the signal)', async () => {
     const lines: LogLine[] = [];
-    const { base, deps } = setup((l) => lines.push(l));
+    const { base, deps } = await setup((l) => lines.push(l));
     const step: SyncStep<Record<string, never>> = {
       entity: 'customers',
       cursorScope: 'global',
@@ -356,17 +362,17 @@ describe('runIntegrationSync - E8 tolerateRejects ratio', () => {
   });
 
   it('advances when the reject ratio is within maxRatio', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const sum = await runIntegrationSync({ syncSteps: [rejectingStep(1, 9, { maxRatio: 0.2 })] }, base, deps, { now: () => at });
     expect(sum.status).toBe('ok');
-    expect(repos.cursors.get('inst', 'products', '')?.last_synced_at).toBe(at.toISOString());
+    expect((await repos.cursors.get('inst', 'products', ''))?.last_synced_at).toBe(at.toISOString());
   });
 
   it('holds the cursor when the reject ratio exceeds maxRatio', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const sum = await runIntegrationSync({ syncSteps: [rejectingStep(5, 5, { maxRatio: 0.2 })] }, base, deps, { now: () => at });
     expect(sum.status).toBe('partial');
-    expect(repos.cursors.get('inst', 'products', '')?.last_synced_at).toBeNull();
+    expect((await repos.cursors.get('inst', 'products', ''))?.last_synced_at).toBeNull();
   });
 });
 
@@ -382,7 +388,7 @@ describe('backoffWindowMs', () => {
 
 describe('runIntegrationSync - E3 failure escalation & backoff', () => {
   it('counts consecutive failures and resets on a clean advance', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const failing: SyncStep<Record<string, never>> = {
       entity: 'orders',
       cursorScope: 'global',
@@ -391,9 +397,9 @@ describe('runIntegrationSync - E3 failure escalation & backoff', () => {
     };
     // Force `full` so backoff never skips (we want the step to actually run each time).
     await runIntegrationSync({ syncSteps: [failing] }, base, deps, { now: () => at, fullBackfill: true });
-    expect(repos.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(1);
+    expect((await repos.cursors.get('inst', 'orders', ''))?.consecutive_failures).toBe(1);
     await runIntegrationSync({ syncSteps: [failing] }, base, deps, { now: () => at, fullBackfill: true });
-    expect(repos.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(2);
+    expect((await repos.cursors.get('inst', 'orders', ''))?.consecutive_failures).toBe(2);
 
     const clean: SyncStep<Record<string, never>> = {
       entity: 'orders',
@@ -402,12 +408,12 @@ describe('runIntegrationSync - E3 failure escalation & backoff', () => {
       run: async () => ({ items: 3, errors: [], advanceCursorTo: at }),
     };
     await runIntegrationSync({ syncSteps: [clean] }, base, deps, { now: () => at, fullBackfill: true });
-    expect(repos.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(0);
+    expect((await repos.cursors.get('inst', 'orders', ''))?.consecutive_failures).toBe(0);
   });
 
   it('logs ERROR at the 3rd consecutive failure', async () => {
     const lines: LogLine[] = [];
-    const { base, deps } = setup((l) => lines.push(l));
+    const { base, deps } = await setup((l) => lines.push(l));
     const failing: SyncStep<Record<string, never>> = {
       entity: 'orders',
       cursorScope: 'global',
@@ -427,7 +433,7 @@ describe('runIntegrationSync - E3 failure escalation & backoff', () => {
   });
 
   it('skips a step in backoff on an incremental tick (cursor untouched)', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     let ran = 0;
     const failing: SyncStep<Record<string, never>> = {
       entity: 'orders',
@@ -447,14 +453,14 @@ describe('runIntegrationSync - E3 failure escalation & backoff', () => {
     expect(ran).toBe(1); // not re-run
     expect(sum.steps[0]?.skippedBackoff).toBe(true);
     // Cursor untouched: still 1 failure, no error added to the run.
-    expect(repos.cursors.get('inst', 'orders', '')?.consecutive_failures).toBe(1);
+    expect((await repos.cursors.get('inst', 'orders', ''))?.consecutive_failures).toBe(1);
     expect(sum.errors).toHaveLength(0);
   });
 });
 
 describe('runIntegrationSync - E4 dead-letter of rejects', () => {
   it('records rejected items to the dead-letter sink (bounded per run)', async () => {
-    const { repos, base, deps } = setup();
+    const { repos, base, deps } = await setup();
     const step: SyncStep<Record<string, never>> = {
       entity: 'products',
       cursorScope: 'global',
@@ -476,7 +482,7 @@ describe('runIntegrationSync - E4 dead-letter of rejects', () => {
       },
     };
     const sum = await runIntegrationSync({ syncSteps: [step] }, base, deps, { now: () => at });
-    const dead = repos.rejectedItems.listByInstallation('inst');
+    const dead = await repos.rejectedItems.listByInstallation('inst');
     expect(dead).toHaveLength(2);
     expect(dead[0]?.entity).toBe('products');
     expect(dead[0]?.run_id).toBe(sum.runId);

@@ -22,7 +22,7 @@ export interface RouteDeps<S> {
    * Enriched health snapshot (DB ping, run ages, cursors in error). Routes
    * only reads `status` (to pick 200 vs 503) and forwards the whole object as JSON.
    */
-  healthReport?(): { status: 'ok' | 'degraded' };
+  healthReport?(): Promise<{ status: 'ok' | 'degraded' }>;
 }
 
 const webhookPayload: RouteOptionsPayload = {
@@ -115,7 +115,7 @@ export function buildRoutes<S>(deps: RouteDeps<S>): ServerRoute[] {
     {
       method: 'GET',
       path: '/health',
-      handler: (_req: Request, h: ResponseToolkit) => {
+      handler: async (_req: Request, h: ResponseToolkit) => {
         // Enriched health: DB ping + last-run age per active installation +
         // cursors in error. A degraded snapshot returns 503 so an orchestrator's
         // readiness/liveness probe can act on it. UNAUTHENTICATED and
@@ -123,7 +123,7 @@ export function buildRoutes<S>(deps: RouteDeps<S>): ServerRoute[] {
         // is a probe endpoint. If no report provider is wired, fall back to the
         // original always-ok shape (backward compatible).
         if (!deps.healthReport) return h.response({ status: 'ok' }).code(200);
-        const report = deps.healthReport();
+        const report = await deps.healthReport();
         return h.response(report).code(report.status === 'degraded' ? 503 : 200);
       },
     },

@@ -10,7 +10,7 @@ An integration has to receive lifecycle webhooks, sync data reliably, expose wid
 - 🔐 Secured webhooks — HMAC signature verification + anti-replay
 - 🔄 Incremental, **cursor-safe** sync — no data loss on error
 - 🌊 Streaming pagination + bounded concurrency — no memory blow-up, no request bursts (429)
-- 💾 Local persistence (SQLite) with **encrypted secrets** at rest
+- 💾 Pluggable persistence — SQLite (zero-config default) or **your own PostgreSQL database** — with **encrypted secrets** at rest
 - 🔌 **Typed** ShopiMind API client (the SDK, re-exported)
 - ⚙️ **Idempotent** provisioning of data sources, custom data and events
 - 🌐 HTTP server + lifecycle handling (install / activate / config / sync)
@@ -23,10 +23,12 @@ Node.js 18+ and TypeScript (ESM / `NodeNext`).
 ## Install
 
 ```bash
-npm i @shopimind/integration-kit-js
+npm i @shopimind/integration-kit-js better-sqlite3
 ```
 
 The ShopiMind SDK is a dependency and is **re-exported**, so you can import SDK resources directly from the kit.
+
+The storage driver is an **optional peer dependency** — install the one matching your backend: `better-sqlite3` for the default SQLite store, or `pg` for [PostgreSQL](#choosing-a-store).
 
 ## Quick start
 
@@ -80,19 +82,86 @@ import { integration } from './integration.js';
 
 const env = process.env;
 
-const app = createIntegrationApp(integration, {
+const app = await createIntegrationApp(integration, {
   databasePath: env.DATABASE_PATH ?? './data/store.sqlite',
   webhookSecret: env.WEBHOOK_SECRET!,     // HMAC secret for ShopiMind webhooks
   credentialsKey: env.CREDENTIALS_KEY,    // 64-hex AES key used to encrypt stored secrets
   port: env.PORT ? Number(env.PORT) : 8080,
 });
 
-void app.start();
+await app.start();
 ```
 
-`createIntegrationApp` wires the HTTP server, the lifecycle dispatcher (signed webhooks), persistence and the sync engine — the kit builds the ShopiMind SDK client itself. You only have to deploy.
+`createIntegrationApp` wires the HTTP server, the lifecycle dispatcher (signed webhooks), persistence (migrated and ready) and the sync engine — the kit builds the ShopiMind SDK client itself. You only have to deploy.
 
 > **Encryption is fail-closed.** Without `credentialsKey`, startup fails — pass `allowPlaintextSecrets: true` to allow plaintext secret storage **for local development only**.
+
+## Choosing a store
+
+The kit persists its operational state (installations, encrypted secrets, sync
+cursors, logs) through a storage **port** with two official adapters. Pick one:
+
+**SQLite — the zero-config default.** One local file, nothing to operate. Ideal
+when your deployment has a persistent disk.
+
+```bash
+npm i better-sqlite3
+```
+```ts
+const app = await createIntegrationApp(integration, {
+  databasePath: './data/store.sqlite',   // that's it
+  // ...
+});
+```
+
+**PostgreSQL — bring your own database.** No local file, no persistent
+filesystem, no native module: the kit's tables live in a **dedicated schema** of
+a database you already run and back up. Great for containers and managed platforms.
+
+```bash
+npm i pg
+```
+```ts
+import { createPostgresStore } from '@shopimind/integration-kit-js/store-postgres';
+
+const app = await createIntegrationApp(integration, {
+  store: await createPostgresStore({
+    connectionString: process.env.DATABASE_URL!,  // or pool: yourExistingPgPool
+    schema: 'shopimind_myintegration',            // one schema per integration
+  }),
+  // ...
+});
+```
+
+Both adapters behave identically (same schema layout, same guarantees — the
+per-installation secrets stay AES-256-GCM encrypted whatever the backend) and
+both pass the same conformance suite in CI.
+
+Operational notes, whatever the store: run **one replica per integration** (the
+sync scheduler and overlap locks are per-process), and on scale-to-zero platforms
+disable `autoSync` and trigger syncs from an external cron via
+`POST /admin/sync/{id}` or `app.runSyncOnce()`.
+
+### Custom store (advanced)
+
+Any backend can power the kit: implement the `IntegrationStore` interface (a
+small set of promise-based, single-statement stores — no transactions to
+implement, and encryption stays in the kit, above the port) and pass it as
+`store`. Validate your adapter with the **conformance suite**, the executable
+contract both official adapters pass:
+
+```ts
+// my-store.conformance.test.ts (vitest or jest)
+import { describe, it, expect } from 'vitest';
+import { runStoreConformanceSuite } from '@shopimind/integration-kit-js/store-testing';
+import { createMyStore } from './my-store.js';
+
+runStoreConformanceSuite(() => createMyStore(), { describe, it, expect });
+```
+
+Semver note: the port may **gain** methods in a minor version of the kit (official
+adapters are updated in lockstep) — re-run the conformance suite when you upgrade.
+Removals or signature changes only happen in a major.
 
 ## The building blocks of an integration
 
@@ -110,7 +179,7 @@ void app.start();
 
 The kit ships a small, self-contained **operations console** for you, the integrator — set
 an `adminToken` and open `http://<host>:<port>/admin/ui`. It runs entirely on your side (it
-only reads the local SQLite store) and lets you:
+only reads the integration's own store) and lets you:
 
 - browse **installations** and drill into cursors, sync runs, webhooks, inbound events and state;
 - inspect the **dead-letter** (items the ShopiMind API refused) and the **audit trail**;
@@ -121,7 +190,7 @@ Safe by default: **PII is masked** (emails, phones, names…) unless you explici
 `SameSite=Strict` session cookie + a CSRF token, and every action is rate-limited.
 
 ```ts
-const app = createIntegrationApp(integration, {
+const app = await createIntegrationApp(integration, {
   databasePath: env.DATABASE_PATH ?? './data/store.sqlite',
   webhookSecret: env.WEBHOOK_SECRET!,
   credentialsKey: env.CREDENTIALS_KEY,

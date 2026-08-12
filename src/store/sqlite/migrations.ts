@@ -206,4 +206,70 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_webhook_seen_created     ON webhook_seen(created_at);
     `,
   },
+  {
+    version: 9,
+    name: 'normalize_legacy_timestamps',
+    sql: `
+      -- ONE-SHOT normalization of the timestamps written by kit v1.
+      --
+      -- v1 stamped rows with SQL 'datetime(''now'')' -> 'YYYY-MM-DD HH:MM:SS'
+      -- (no 'T', no 'Z', no milliseconds). v2 writes ISO-8601 UTC from JS
+      -- ('YYYY-MM-DDTHH:MM:SS.sssZ'). Both formats sort lexicographically, but
+      -- NOT against each other: ' ' (0x20) < 'T' (0x54), so a legacy row would
+      -- compare as OLDER than an ISO instant of the same calendar day. On a
+      -- retention purge (created_at < cutoff) that silently deletes legacy log
+      -- rows up to ~24h early, and the dashboard's rolling-window counters
+      -- under-count them.
+      --
+      -- Rewriting the legacy rows once, at upgrade time, removes the mixed-format
+      -- comparison entirely instead of scattering conversions across every query
+      -- (which would also defeat the time indexes added in v8).
+      --
+      -- The LIKE pattern matches the legacy shape EXACTLY (19 chars) so ISO values
+      -- and NULLs are left untouched; re-running is a no-op (idempotent by design,
+      -- and the runner applies a version only once anyway).
+      UPDATE installs SET created_at = replace(created_at, ' ', 'T') || '.000Z'
+        WHERE created_at LIKE '____-__-__ __:__:__';
+      UPDATE installs SET updated_at = replace(updated_at, ' ', 'T') || '.000Z'
+        WHERE updated_at LIKE '____-__-__ __:__:__';
+      UPDATE installs SET installed_at = replace(installed_at, ' ', 'T') || '.000Z'
+        WHERE installed_at LIKE '____-__-__ __:__:__';
+      UPDATE installs SET activated_at = replace(activated_at, ' ', 'T') || '.000Z'
+        WHERE activated_at LIKE '____-__-__ __:__:__';
+      UPDATE installs SET deactivated_at = replace(deactivated_at, ' ', 'T') || '.000Z'
+        WHERE deactivated_at LIKE '____-__-__ __:__:__';
+      UPDATE installs SET uninstalled_at = replace(uninstalled_at, ' ', 'T') || '.000Z'
+        WHERE uninstalled_at LIKE '____-__-__ __:__:__';
+
+      UPDATE integration_state SET updated_at = replace(updated_at, ' ', 'T') || '.000Z'
+        WHERE updated_at LIKE '____-__-__ __:__:__';
+
+      UPDATE sync_cursor SET updated_at = replace(updated_at, ' ', 'T') || '.000Z'
+        WHERE updated_at LIKE '____-__-__ __:__:__';
+      UPDATE sync_cursor SET last_synced_at = replace(last_synced_at, ' ', 'T') || '.000Z'
+        WHERE last_synced_at LIKE '____-__-__ __:__:__';
+
+      UPDATE sync_run SET started_at = replace(started_at, ' ', 'T') || '.000Z'
+        WHERE started_at LIKE '____-__-__ __:__:__';
+      UPDATE sync_run SET finished_at = replace(finished_at, ' ', 'T') || '.000Z'
+        WHERE finished_at LIKE '____-__-__ __:__:__';
+
+      UPDATE webhook_log SET created_at = replace(created_at, ' ', 'T') || '.000Z'
+        WHERE created_at LIKE '____-__-__ __:__:__';
+
+      UPDATE webhook_seen SET created_at = replace(created_at, ' ', 'T') || '.000Z'
+        WHERE created_at LIKE '____-__-__ __:__:__';
+
+      UPDATE inbound_event SET received_at = replace(received_at, ' ', 'T') || '.000Z'
+        WHERE received_at LIKE '____-__-__ __:__:__';
+      UPDATE inbound_event SET processed_at = replace(processed_at, ' ', 'T') || '.000Z'
+        WHERE processed_at LIKE '____-__-__ __:__:__';
+
+      UPDATE rejected_item SET created_at = replace(created_at, ' ', 'T') || '.000Z'
+        WHERE created_at LIKE '____-__-__ __:__:__';
+
+      UPDATE audit_log SET at = replace(at, ' ', 'T') || '.000Z'
+        WHERE at LIKE '____-__-__ __:__:__';
+    `,
+  },
 ];

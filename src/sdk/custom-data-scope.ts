@@ -1,5 +1,4 @@
 import { SpmCustomDataRecords, type SpmEnvelope, type SpmHttpClient } from '@shopimind/sdk-js';
-import type { IntegrationStateRepo } from '../store/repositories.js';
 import type { BulkResult, SendBulk, SendBulkOptions } from './send-bulk.js';
 
 /**
@@ -19,26 +18,26 @@ export interface CustomDataHandle {
 
 /**
  * Builds `ctx.customData`: resolves the numeric id of a PROVISIONED custom data
- * definition (from the integration state, by `name`) and returns a
- * {@link CustomDataHandle}. Throws if the definition was not declared in
- * `provisioning.customData` (the symmetric guard of {@link makeWithSource}).
+ * definition (by `name`) and returns a {@link CustomDataHandle}. Throws if the
+ * definition was not declared in `provisioning.customData` (the symmetric guard
+ * of {@link makeWithSource}).
+ *
+ * `provisioningRaw` is the persisted provisioning blob, PRE-LOADED by the runtime
+ * when the context is built (see {@link makeWithSource} for why).
  */
 export function makeCustomData(
-  state: IntegrationStateRepo,
-  installationId: string,
-  provisioningKey: string,
+  provisioningRaw: string | null,
   sendBulk: SendBulk,
   spm: SpmHttpClient,
 ): (name: string) => CustomDataHandle {
   return (name: string): CustomDataHandle => {
-    const raw = state.get(installationId, provisioningKey);
     // Parse defensively: a corrupt/unreadable persisted blob is treated as
     // "nothing provisioned" and surfaces as the business error below, never as
     // an opaque SyntaxError.
     let defIds: Record<string, number> = {};
-    if (raw) {
+    if (provisioningRaw) {
       try {
-        defIds = (JSON.parse(raw) as { defIds?: Record<string, number> }).defIds ?? {};
+        defIds = (JSON.parse(provisioningRaw) as { defIds?: Record<string, number> }).defIds ?? {};
       } catch {
         defIds = {};
       }
