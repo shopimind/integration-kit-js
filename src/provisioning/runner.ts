@@ -1,4 +1,10 @@
-import { SpmOrdersStatuses, SpmHelpers, type SpmHttpClient } from '@shopimind/sdk-js';
+import {
+  SpmOrdersStatuses,
+  SpmApiError,
+  SpmHelpers,
+  type SpmEnvelope,
+  type SpmHttpClient,
+} from '@shopimind/sdk-js';
 import type { ProvisioningPlan } from '../integration/types.js';
 import type { NewCustomDataDefinition } from '../contracts/index.js';
 import { validateProvisioningEvents, validateCustomDataDefinition } from '../integration/define-integration.js';
@@ -52,6 +58,10 @@ export async function runProvisioning(
         client,
         resolveCustomRelationTargets(def, result.defIds, logger),
         logger,
+        // Non-fatal problems (e.g. a stale custom->custom relationship the API cannot
+        // repair) are REPORTED, not thrown: the definition itself is usable, so the
+        // id must still be resolved — but the operator has to see the issue.
+        (message) => result.errors.push(`def ${def.name}: ${message}`),
       );
     } catch (e) {
       result.errors.push(`def ${def.name}: ${errMsg(e)}`);
@@ -166,6 +176,32 @@ export function topoSortCustomData(defs: NewCustomDataDefinition[]): NewCustomDa
   return sorted;
 }
 
+/**
+ * The BUSINESS message carried by a failed call.
+ *
+ * `env.error.message` is NOT it: the SDK fills it with the transport-level text
+ * ("Request failed with status code 400"). What the API actually wrote sits in the
+ * raw body, at `env.data.message` — a string, or a string[] for validation errors.
+ */
+function apiMessage(env: SpmEnvelope | null | undefined): string {
+  const body = env?.data as { message?: unknown } | null | undefined;
+  const raw = body?.message;
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) return raw.map((m) => String(m)).join('; ');
+  return '';
+}
+
+/**
+ * Message pushed into `result.errors` — the only operator-facing rendering of a
+ * provisioning failure (logged by the dispatcher, returned by the admin reprovision
+ * route). For an SDK failure `e.message` carries only the generic transport text, so
+ * without the envelope body the operator gets a string that names the call which
+ * failed but never the reason.
+ */
 function errMsg(e: unknown): string {
+  if (e instanceof SpmApiError) {
+    const detail = apiMessage(e.envelope);
+    return detail ? `${e.message} -- ${detail}` : e.message;
+  }
   return e instanceof Error ? e.message : String(e);
 }

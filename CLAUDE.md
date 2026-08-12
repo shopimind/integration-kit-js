@@ -1,4 +1,4 @@
-# CLAUDE.md — @shopimind/integration-kit-js
+# CLAUDE.md (@shopimind/integration-kit-js)
 
 Guide pour les assistants IA et les équipes ShopiMind travaillant dans ce dépôt.
 Ce fichier est versionné dans git mais **n'est pas publié sur npm** (`package.json` → `"files": ["dist"]`).
@@ -8,11 +8,11 @@ Ce fichier est versionné dans git mais **n'est pas publié sur npm** (`package.
 Les intégrations se bâtissent dessus. Le kit fournit toute l'infrastructure (webhooks sécurisés, synchro à
 curseur sûr, persistance SQLite avec **secrets chiffrés au repos**, ré-export du SDK ShopiMind, provisioning
 idempotent, serveur HTTP, déclaration de widgets). Une intégration n'écrit que des fonctions pures + des
-déclarations — elle ne réimplémente jamais l'infra.
+déclarations ; elle ne réimplémente jamais l'infra.
 
 ## Écosystème
-- `@shopimind/sdk-js` — SDK bas niveau pour dialoguer avec l'API ShopiMind (paquet séparé, dépendance ré-exportée).
-- `@shopimind/integration-kit-js` — CE dépôt : la fondation des intégrations (kit JS ; des kits php/go suivront).
+- `@shopimind/sdk-js` : SDK bas niveau pour dialoguer avec l'API ShopiMind (paquet séparé, dépendance ré-exportée).
+- `@shopimind/integration-kit-js` (CE dépôt) : la fondation des intégrations (kit JS ; des kits php/go suivront).
 - Une intégration se bâtit sur le kit, qu'elle consomme via la version publiée `@shopimind/integration-kit-js@^x.y.z`.
 
 ## Stack & commandes
@@ -49,33 +49,33 @@ déclarations — elle ne réimplémente jamais l'infra.
   (microservices, stratégie de dépôts, sections mainteneur…).
 
 ## Repères d'architecture (src/)
-- `integration/` — le contrat `Integration<S>` + `defineIntegration`.
-- `contracts/` — les types partagés (config, widgets, SDK, lifecycle).
-- `sync/` — moteur à curseur (avance **seulement si `errors === 0`**), pagination streaming, concurrence bornée.
-- `security/` — signature HMAC (corps brut, timing-safe, anti-rejeu), crypto AES-256-GCM, redaction.
-- `store/` — la persistance est un **PORT async** (`port.ts` : `IntegrationStore`, 9 stores + migrate/ping/close)
+- `integration/` : le contrat `Integration<S>` + `defineIntegration`.
+- `contracts/` : les types partagés (config, widgets, SDK, lifecycle).
+- `sync/` : moteur à curseur (avance **seulement si `errors === 0`**), pagination streaming, concurrence bornée.
+- `security/` : signature HMAC (corps brut, timing-safe, anti-rejeu), crypto AES-256-GCM, redaction.
+- `store/` regroupe la persistance, un **PORT async** (`port.ts` : `IntegrationStore`, 9 stores + migrate/ping/close)
   avec deux adapters officiels : `store/sqlite/` (défaut, better-sqlite3) et `store/postgres/` (pg, schéma dédié
   configurable dans la base de l'intégrateur). `repositories.ts` = les FAÇADES kit au-dessus du port (async) :
   clamps de pagination, conversions jours→cutoffs ISO, sérialisation défensive, et **chiffrement des secrets**
-  (`state.setSecret`, AES-256-GCM + AAD) — un adapter ne voit jamais un secret en clair. Timestamps générés côté
-  JS (ISO UTC, `time.ts`) — jamais par le SQL ; parsing tolérant aux lignes legacy v1 (`parseStoreTimestamp`).
+  (`state.setSecret`, AES-256-GCM + AAD). Un adapter ne voit jamais un secret en clair. Timestamps générés côté
+  JS (ISO UTC, `time.ts`), jamais par le SQL ; parsing tolérant aux lignes legacy v1 (`parseStoreTimestamp`).
   Migrations versionnées append-only PAR DIALECTE (sqlite v1..v8 historiques + v9 qui normalise une fois
-  les timestamps écrits par la v1 via `datetime('now')` — sans quoi les deux formats se comparent mal
+  les timestamps écrits par la v1 via `datetime('now')`, sans quoi les deux formats se comparent mal
   (`' '` < `'T'`) et une purge de rétention supprimerait jusqu'à 24 h de journaux hérités en avance ;
   postgres v1 consolidée).
   La suite de conformité (`testing/store-conformance.ts`, export `./store-testing`) est le contrat exécutable du
-  port — les deux adapters la passent en CI (PG réel via service docker, `TEST_POSTGRES_URL`) ; un store tiers
+  port. Les deux adapters la passent en CI (PG réel via service docker, `TEST_POSTGRES_URL`) ; un store tiers
   doit la passer aussi. Politique semver du port : extensions possibles en minor, retraits en major uniquement.
-  Drivers en **peer deps optionnelles** (`better-sqlite3`, `pg`) chargés dynamiquement — une intégration installe
+  Drivers en **peer deps optionnelles** (`better-sqlite3`, `pg`) chargés dynamiquement : une intégration installe
   le sien. **Seuls les secrets sont chiffrés** au repos ; les PII et l'état non-secret sont en clair, le fichier
   SQLite / la base PG ne sont pas chiffrés par le kit.
-- `sdk/` — helpers `withSource` (→ `SourceHandle`), `customData` (→ `CustomDataHandle`) et
+- `sdk/` fournit les helpers `withSource` (→ `SourceHandle`), `customData` (→ `CustomDataHandle`) et
   `sendBulk` (push sûr : chunké, throw sur transport, remonte les rejets) ; le client SDK provient
   de `@shopimind/sdk-js`, dépendance directe **ré-exportée** par le kit (`export * from '@shopimind/sdk-js'`).
   Plus de gateway/adaptateur : l'intégration tape le SDK directement via `ctx.spm` (un `SpmHttpClient`).
-- `provisioning/` — find-or-create idempotent (sources de données, custom data + relations, events).
+- `provisioning/` : find-or-create idempotent (sources de données, custom data + relations, events).
   Relations custom→custom : la cible peut être désignée par NOM (déf sœur), résolue en id à la création.
-- `lifecycle/`, `http/`, `runtime/` — dispatcher de cycle de vie, serveur Hapi, assemblage (`createIntegrationApp`).
+- `lifecycle/`, `http/`, `runtime/` : dispatcher de cycle de vie, serveur Hapi, assemblage (`createIntegrationApp`).
 - **Surface admin & UI d'exploitation** (100 % côté intégrateur, ne lit que le SQLite local) :
   - `http/admin-auth.ts` (comparaison timing-safe du jeton), `http/admin-session.ts` (session
     navigateur : cookie HttpOnly `SameSite=Strict` + CSRF, TTL glissant, cap LRU),

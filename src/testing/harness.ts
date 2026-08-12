@@ -110,8 +110,14 @@ function stubBody(method: string, url: string): unknown {
 }
 
 /** Request seen by a scriptable stub (request body already deserialized). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type SpmStubRequest = { method: string; url: string; body: any };
+export type SpmStubRequest = {
+  method: string;
+  url: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: any;
+  /** Query string sent with the request (axios `config.params`), for GET listings. */
+  params?: Record<string, unknown>;
+};
 
 /** Scripted reply: `body` = RAW HTTP body. `status >= 400` → error (axios rejection). */
 export interface SpmStubReply {
@@ -132,7 +138,10 @@ export function makeScriptedSpmClient(handler: (req: SpmStubRequest) => SpmStubR
     const method = String(config.method ?? 'get').toLowerCase();
     const url = String(config.url ?? '');
     const body = config.data ? JSON.parse(config.data) : undefined;
-    const r = handler({ method, url, body });
+    // Query params live OUTSIDE `url` in axios: expose them so a test can assert on
+    // pagination/filtering, not just on the path.
+    const params = (config.params ?? undefined) as Record<string, unknown> | undefined;
+    const r = handler({ method, url, body, ...(params ? { params } : {}) });
     const status = r.status ?? 200;
     const response = { data: r.body ?? {}, status, statusText: '', headers: {}, config };
     if (status >= 200 && status < 300) return response;

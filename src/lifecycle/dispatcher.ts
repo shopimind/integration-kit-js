@@ -13,6 +13,7 @@ import { verifyShopimindSignatureMulti } from '../security/signature.js';
 import { redact } from '../security/redaction.js';
 import { saveConfigs, loadConfigs, sensitiveKeys } from '../config/config-store.js';
 import { runProvisioning } from '../provisioning/runner.js';
+import { PROVISIONING_KEY, persistProvisioningMap } from './provisioning-state.js';
 import { ensureInboundSecret } from './inbound.js';
 import { makeWithSource } from '../sdk/source-scope.js';
 import { makeSendBulk } from '../sdk/send-bulk.js';
@@ -39,7 +40,7 @@ type AllLifecycleFields = {
 
 export const ACCESS_TOKEN_KEY = '__access_token';
 /** State key where the provisioning result (sourceIds/defIds) is stored. */
-export const PROVISIONING_KEY = '__provisioning';
+export { PROVISIONING_KEY };
 
 export interface DispatcherDeps<S> {
   integration: Integration<S>;
@@ -221,7 +222,7 @@ async function onActivate<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S>): P
   if (deps.integration.provisioning) {
     const plan = await deps.integration.provisioning(ctx);
     const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
-    await deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
+    await persistProvisioningMap(deps.repos.state, id, prov);
     if (prov.errors.length > 0) {
       // Count ALL successful resources (sources, defs, events, statuses) — not
       // just sources/defs: an events-only integration (loyalty/reviews) provisions
@@ -278,7 +279,13 @@ async function onConfigUpdated<S>(p: LifecycleRawPayload, deps: DispatcherDeps<S
     if (deps.integration.provisioning) {
       const plan = await deps.integration.provisioning(ctx);
       const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
-      await deps.repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
+      await persistProvisioningMap(deps.repos.state, id, prov);
+      // `runProvisioning` COLLECTS per-resource errors instead of throwing, so the
+      // catch below never sees them: without this, a reprovisioning that fails on
+      // this path is COMPLETELY silent (the webhook still answers success:true).
+      if (prov.errors.length > 0) {
+        deps.logger.warn('config_updated: partial provisioning', { installation_id: id, errors: prov.errors });
+      }
     }
     if (deps.integration.hooks?.onConfigUpdated) {
       // Rebuild the context so the hook sees the FRESH provisioning ids persisted above.

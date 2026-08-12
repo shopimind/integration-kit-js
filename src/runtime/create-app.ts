@@ -7,7 +7,8 @@ import { SecretCipher } from '../security/crypto.js';
 import { createLogger, type Logger } from '../logging/logger.js';
 import { loadConfigs } from '../config/config-store.js';
 import { runIntegrationSync, type SyncSummary } from '../sync/engine.js';
-import { ACCESS_TOKEN_KEY, PROVISIONING_KEY, type DispatcherDeps } from '../lifecycle/dispatcher.js';
+import { ACCESS_TOKEN_KEY, type DispatcherDeps } from '../lifecycle/dispatcher.js';
+import { PROVISIONING_KEY, persistProvisioningMap } from '../lifecycle/provisioning-state.js';
 import { runProvisioning } from '../provisioning/runner.js';
 import { ensureInboundSecret } from '../lifecycle/inbound.js';
 import { makeWithSource } from '../sdk/source-scope.js';
@@ -276,7 +277,7 @@ export async function createIntegrationApp<S>(
       if (!integration.provisioning) return { sources: 0, defs: 0, events: 0, orderStatuses: 0, errors: [] };
       const plan = await integration.provisioning(ctx);
       const prov = await runProvisioning(ctx.spm, plan, ctx.logger);
-      await repos.state.set(id, PROVISIONING_KEY, JSON.stringify({ sourceIds: prov.sourceIds, defIds: prov.defIds }));
+      await persistProvisioningMap(repos.state, id, prov);
       return {
         sources: Object.keys(prov.sourceIds).length,
         defs: Object.keys(prov.defIds).length,

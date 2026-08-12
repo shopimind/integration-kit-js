@@ -142,6 +142,73 @@ describe('runProvisioning', () => {
     expect(r.defIds).toEqual({ stores: 40, contact_store: 41 });
     expect(r.errors).toEqual([]);
   });
+
+  it('surfaces the API business message in the collected errors (diagnosability)', async () => {
+    const r = await runProvisioning(
+      mockClient((req) => {
+        if (req.method === 'get' && req.url === 'custom-data-definitions')
+          return read([{ id_definition: 1, name: 'pos_profile', status: 'active' }]);
+        if (req.method === 'get' && req.url === 'custom-data-definitions/1')
+          return { status: 400, body: { statusCode: 400, message: 'Custom data definition not found' } };
+        return okHandler(req);
+      }),
+      plan,
+    );
+    expect(r.defIds.pos_profile).toBeUndefined(); // the key is never written on failure
+    expect(r.errors.some((e) => e.startsWith('def pos_profile:'))).toBe(true);
+    // Without this, the operator only ever saw "Request failed with status code 400".
+    expect(r.errors.some((e) => e.includes('Custom data definition not found'))).toBe(true);
+    expect(r.events).toBe(1); // best-effort: the other resources still went through
+  });
+
+  it('joins a validation message array into the collected error', async () => {
+    const r = await runProvisioning(
+      mockClient((req) => {
+        if (req.method === 'post' && req.url === 'data-sources')
+          return { status: 400, body: { statusCode: 400, message: ['label must be a string', 'type is invalid'] } };
+        return okHandler(req);
+      }),
+      plan,
+    );
+    expect(r.errors.some((e) => e.includes('label must be a string; type is invalid'))).toBe(true);
+  });
+
+  it('collects a stale custom relationship WITHOUT dropping the definition id', async () => {
+    const r = await runProvisioning(
+      mockClient((req) => {
+        if (req.method === 'get' && req.url === 'custom-data-definitions')
+          return read([
+            { id_definition: 40, name: 'stores', status: 'active' },
+            { id_definition: 41, name: 'contact_store', status: 'active' },
+          ]);
+        if (req.method === 'get' && req.url === 'custom-data-definitions/40')
+          return read({ id_definition: 40, name: 'stores', fields: [{ name: 'store_ref' }] });
+        if (req.method === 'get' && req.url === 'custom-data-definitions/41')
+          return read({
+            id_definition: 41,
+            name: 'contact_store',
+            fields: [{ name: 'store' }],
+            // Stale: points at a definition that was deleted and re-created as 40.
+            relationships: [{ sourceField: 'store', targetSchema: '7' }],
+          });
+        return okHandler(req);
+      }),
+      {
+        customData: [
+          {
+            name: 'contact_store',
+            fields: [{ name: 'store', type: 'number' }],
+            relationships: [{ sourceField: 'store', targetSchemaType: 'custom', targetSchema: 'stores' }],
+          },
+          { name: 'stores', fields: [{ name: 'store_ref', type: 'text' }] },
+        ],
+      },
+    );
+    // The definition stays usable -> its id IS resolved (the install must not hard-fail)...
+    expect(r.defIds).toEqual({ stores: 40, contact_store: 41 });
+    // ...but the broken link is reported instead of converging silently.
+    expect(r.errors.some((e) => /^def contact_store: relationship 'store' still points at definition 7/.test(e))).toBe(true);
+  });
 });
 
 describe('topoSortCustomData', () => {
